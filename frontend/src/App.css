@@ -1,0 +1,237 @@
+.radar-shell {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #071018;
+}
+
+.radar-map {
+  position: absolute;
+  inset: 0;
+}
+
+.radar-map::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  content: '';
+  background:
+    linear-gradient(180deg, rgba(4, 10, 16, 0.64), transparent 25%),
+    radial-gradient(circle at 50% 48%, transparent 35%, rgba(3, 8, 13, 0.36) 100%);
+}
+
+.radar-header,
+.radar-panel,
+.production-model-panel,
+.radar-footer {
+  position: absolute;
+  z-index: 3;
+}
+
+.radar-header {
+  top: 28px;
+  right: 30px;
+  left: 30px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  pointer-events: none;
+}
+
+.eyebrow,
+.panel-label {
+  margin: 0;
+  color: #8fa4b9;
+  font-size: 0.65rem;
+  font-weight: 750;
+  letter-spacing: 0.17em;
+  line-height: 1.2;
+}
+
+.radar-header h1 {
+  margin: 5px 0 0;
+  color: #f7fafc;
+  font-size: clamp(1.45rem, 3vw, 2.2rem);
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.radar-header-actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.connection-status,
+.radar-panel,
+.production-model-panel {
+  border: 1px solid rgba(173, 197, 220, 0.22);
+  background: rgba(7, 16, 25, 0.8);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(14px);
+}
+
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+  border-radius: 999px;
+  color: #dce7f1;
+  font-size: 0.76rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f5b942;
+  box-shadow: 0 0 0 4px rgba(245, 185, 66, 0.12);
+}
+
+.connection-status[data-status='open'] .status-dot {
+  background: #67e8a8;
+  box-shadow: 0 0 0 4px rgba(103, 232, 168, 0.12);
+}
+
+.connection-status[data-status='error'] .status-dot {
+  background: #fb7185;
+  box-shadow: 0 0 0 4px rgba(251, 113, 133, 0.12);
+}
+
+.radar-panel,
+.production-model-panel {
+  bottom: 28px;
+  display: grid;
+  width: min(246px, calc(100vw - 60px));
+  padding: 17px 18px;
+  border-radius: 14px;
+}
+
+.radar-panel {
+  left: 30px;
+}
+
+.production-model-panel {
+  right: 30px;
+  bottom: 84px;
+}
+
+.radar-panel strong,
+.production-model-panel strong {
+  margin-top: 9px;
+  font-size: 2.6rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 0.88;
+}
+
+.radar-panel strong {
+  color: #ffd200;
+}
+
+.production-model-panel strong {
+  color: #61dafb;
+}
+
+.radar-panel > span,
+.production-model-panel > span {
+  margin-top: 7px;
+  color: #d9e5ef;
+  font-size: 0.79rem;
+}
+
+.estimated-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(173, 197, 220, 0.16);
+  color: #aebecb;
+  font-size: 0.69rem;
+  line-height: 1.35;
+}
+
+.vehicle-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border: 1.5px solid #ee503f;
+  border-radius: 50%;
+  background: #ffd200;
+}
+
+.radar-footer {
+  right: 30px;
+  bottom: 30px;
+  max-width: 290px;
+  color: rgba(220, 231, 241, 0.78);
+  font-size: 0.67rem;
+  letter-spacing: 0.025em;
+  line-height: 1.4;
+  text-align: right;
+  text-shadow: 0 1px 6px #02070b;
+}
+
+.maplibregl-ctrl-group {
+  overflow: hidden;
+  border: 1px solid rgba(173, 197, 220, 0.25);
+  border-radius: 10px;
+  background: rgba(7, 16, 25, 0.84);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(10px);
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top-color: rgba(173, 197, 220, 0.2);
+}
+
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(1) brightness(1.8);
+}
+
+@media (max-width: 640px) {
+  .radar-header {
+    top: 18px;
+    right: 18px;
+    left: 18px;
+    align-items: flex-end;
+  }
+
+  .connection-status {
+    padding: 8px 10px;
+    font-size: 0.65rem;
+  }
+
+  .radar-panel,
+  .production-model-panel {
+    bottom: 18px;
+    width: 215px;
+    padding: 14px;
+  }
+
+  .radar-panel {
+    left: 18px;
+  }
+
+  .production-model-panel {
+    right: 18px;
+    bottom: 74px;
+  }
+
+  .radar-footer {
+    right: 18px;
+    bottom: 20px;
+    width: 140px;
+    font-size: 0.58rem;
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "name": "bvg-3d-radar",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "antigravity": "agy",
+    "codex": "codex",
+    "gtfs:import-local": "bash scripts/import_static_gtfs_local.sh",
+    "supabase": "supabase",
+    "supabase:reset": "supabase db reset",
+    "supabase:start": "supabase start",
+    "supabase:status": "supabase status",
+    "supabase:stop": "supabase stop",
+    "test:phase1": "uv run --with pglast python scripts/validate_phase_1_sql.py",
+    "test:phase2:sql": "uv run --with pglast python scripts/validate_phase_2_sql.py",
+    "test:phase2:local": "bash scripts/validate_phase_2_local.sh",
+    "test:python": "uv run pytest",
+    "test": "npm run test:phase1 && npm run test:phase2:sql && npm run test:python",
+    "ws:client": "uv run python scripts/ws_positions_client.py",
+    "ws:serve": "uv run uvicorn bvg_radar.server:create_app --factory --host 127.0.0.1 --port 8000"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@openai/codex": "^0.144.5",
+    "supabase": "^2.109.1"
+  }
+}

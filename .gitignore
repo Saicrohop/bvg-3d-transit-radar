@@ -1,0 +1,23 @@
+# Node.js
+node_modules/
+
+# Local and private configuration
+.env
+.env.*
+!.env.example
+
+# Supabase CLI runtime data
+supabase/.temp/
+supabase/.branches/
+
+# Downloaded GTFS source feeds
+data/gtfs-static/
+
+# Python runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Local Hermes metadata and desktop attachments
+.hermes/

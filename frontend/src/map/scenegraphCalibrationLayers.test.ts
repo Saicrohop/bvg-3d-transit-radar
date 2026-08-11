@@ -59,12 +59,12 @@ describe('createScenegraphCalibrationLayers', () => {
     expect(getOrientationFromScenegraphLayer(busLayer, northboundBus)).toEqual([
       0,
       90,
-      0,
+      90,
     ])
     expect(getOrientationFromScenegraphLayer(busLayer, southboundBus)).toEqual([
       0,
       -90,
-      0,
+      90,
     ])
     expect(getOrientationFromScenegraphLayer(trainLayer, eastboundTrain)).toEqual([
       0,

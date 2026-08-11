@@ -143,12 +143,12 @@ describe('createProductionScenegraphLayers', () => {
     expect(getOrientationFromScenegraphLayer(genericLayer, u2)).toEqual([
       0,
       90,
-      0,
+      90,
     ])
     expect(getOrientationFromScenegraphLayer(genericLayer, route100)).toEqual([
       0,
       -90,
-      0,
+      90,
     ])
     expect(genericVehicles.map((vehicle) => vehicle.trip_id)).not.toContain(
       'unknown-trip',

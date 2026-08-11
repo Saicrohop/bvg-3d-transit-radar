@@ -24,7 +24,7 @@ const MODEL_YAW_OFFSETS: Readonly<Record<CalibrationVehicleType, number>> = {
 }
 
 const MODEL_ROLL_OFFSETS: Readonly<Record<CalibrationVehicleType, number>> = {
-  bus: 0,
+  bus: 90,
   train: 90,
 }
 
@@ -38,7 +38,7 @@ export const MODEL_SIZE_SCALES: Readonly<
 const MODEL_TRANSLATIONS: Readonly<
   Record<CalibrationVehicleType, readonly [number, number, number]>
 > = {
-  bus: [0, 0, 7.03],
+  bus: [0, 0, 6.293897],
   train: [0, 0, 0],
 }
 

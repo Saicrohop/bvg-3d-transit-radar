@@ -24,6 +24,7 @@ describe('createVehiclePointLayer', () => {
     const layer = createVehiclePointLayer([vehicle])
 
     expect(layer.id).toBe('estimated-vehicle-points')
+    expect(layer.props.transitions).toEqual({ getPosition: 1000 })
     expect(getVehiclePosition(vehicle)).toEqual([13.405, 52.52])
     expect(VEHICLE_FILL_COLOR).toEqual([255, 210, 0])
   })

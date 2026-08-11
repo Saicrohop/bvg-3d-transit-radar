@@ -126,6 +126,12 @@ describe('RadarMap', () => {
       'estimated-vehicle-points',
     ])
     expect(overlay?.props.effects).toHaveLength(1)
+    expect(overlay?.props.interleaved).toBe(false)
+    expect(overlay?.props.deviceProps).toMatchObject({
+      type: 'best-available',
+      createCanvasContext: { alphaMode: 'premultiplied' },
+    })
+    expect(overlay?.props.onDeviceInitialized).toEqual(expect.any(Function))
     expect(
       layers.find((layer) => layer.id === 'estimated-s-bahn-3d')?.props
         .data,

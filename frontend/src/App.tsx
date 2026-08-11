@@ -1,5 +1,7 @@
 import './App.css'
 
+import { useMemo } from 'react'
+
 import { RadarMap } from './map/RadarMap'
 import { useEstimatedVehiclePositions } from './realtime/useEstimatedVehiclePositions'
 
@@ -14,15 +16,17 @@ const CONNECTION_LABELS = {
   open: 'WebSocket conectado',
 } as const
 
-function App() {
+function RealtimeRadarView() {
   const { connectionStatus, vehicles } =
     useEstimatedVehiclePositions(POSITIONS_WS_URL)
-  const categorizedVehicleCount = vehicles.filter(
-    (vehicle) => vehicle.vehicle_category !== null,
-  ).length
+  const categorizedVehicleCount = useMemo(
+    () =>
+      vehicles.filter((vehicle) => vehicle.vehicle_category !== null).length,
+    [vehicles],
+  )
 
   return (
-    <main className="radar-shell">
+    <>
       <RadarMap vehicles={vehicles} />
 
       <header className="radar-header">
@@ -68,6 +72,14 @@ function App() {
       <footer className="radar-footer">
         Modelos 3D categorizados · estimativas por TripUpdate, não GPS
       </footer>
+    </>
+  )
+}
+
+function App() {
+  return (
+    <main className="radar-shell">
+      <RealtimeRadarView />
     </main>
   )
 }

@@ -127,6 +127,7 @@ describe('createProductionScenegraphLayers', () => {
     expect(getScenegraphUrl(genericLayer)).toBe('/models/bvg_bus.glb')
     expect(genericLayer?.props.sizeScale).toBe(20)
     expect(genericLayer?.props._lighting).toBe('pbr')
+    expect(genericLayer?.props.transitions).toEqual({ getPosition: 1000 })
     expect(genericVehicles.map((vehicle) => vehicle.trip_id)).toEqual([
       'u2-trip',
       '100-trip',
@@ -165,6 +166,7 @@ describe('createProductionScenegraphLayers', () => {
     expect(getScenegraphUrl(sBahnLayer)).toBe('/models/s_bahn_db.glb')
     expect(sBahnLayer?.props.sizeScale).toBe(0.75)
     expect(sBahnLayer?.props._lighting).toBe('pbr')
+    expect(sBahnLayer?.props.transitions).toEqual({ getPosition: 1000 })
 
     const sBahnVehicles = sBahnLayer?.props.data as
       | readonly ProductionScenegraphVehicle[]

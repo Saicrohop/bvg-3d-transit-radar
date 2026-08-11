@@ -137,3 +137,21 @@ carregado.
   suprimidas em vez de fabricadas.
 - Longitude/latitude usam WGS84 (EPSG:4326); métricas de bearing e velocidade
   são calculadas em EPSG:25833.
+
+## 🚇 Berlin 3D Transit Radar & Analytics
+
+Ever wondered if your S-Bahn is actually on time, or if it's just an urban legend? Welcome to the Berlin Transit Radar! 🐻✨
+
+This project is more than just a map; it's a real-time, 3D heartbeat of Berlin's entire public transport network (VBB/BVG). I'm building this open platform not just to watch yellow buses and red trains cruise around the city in glorious 3D, but to bring real data transparency to our daily commute.
+
+### 🎯 The Grand Vision
+
+Currently, the radar tracks live vehicles across the city. But the ultimate goal is to turn this into the ultimate transit analytics hub for Berliners:
+
+🏆 **The Efficiency Leaderboard:** Which lines are actually carrying the city on their backs? We will track and rank the most efficient and punctual routes.
+
+🐌 **The Delay Wall of Shame:** Real-time data doesn't lie. We'll identify the lines that are constantly late so you know exactly what to avoid.
+
+🚨 **Smart Commute Alerts:** Say goodbye to waiting on a freezing platform. The platform will push real-time alerts for delays, disruptions, or bottlenecks on your specific daily routes.
+
+Grab your Club-Mate, watch the U-Bahn navigate the city in real-time, and let's bring some data-driven justice to our public transit! 🚦📊

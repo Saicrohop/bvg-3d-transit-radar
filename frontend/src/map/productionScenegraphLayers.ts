@@ -25,11 +25,13 @@ export type ScenegraphAssetErrorHandler = (
 ) => void
 
 export type ProductionScenegraphLayerOptions = Readonly<{
+  enablePositionTransitions?: boolean
   failedVehicleTypes?: ReadonlySet<CalibrationVehicleType>
   onScenegraphAssetError?: ScenegraphAssetErrorHandler
 }>
 
 const EMPTY_FAILED_VEHICLE_TYPES: ReadonlySet<CalibrationVehicleType> = new Set()
+const VEHICLE_POSITION_TRANSITION = { getPosition: 1000 } as const
 
 const MODEL_TYPE_BY_CATEGORY: Readonly<
   Record<VehicleCategory, CalibrationVehicleType>
@@ -43,6 +45,7 @@ const MODEL_TYPE_BY_CATEGORY: Readonly<
 export function createProductionScenegraphLayers(
   vehicles: readonly EstimatedVehiclePosition[],
   {
+    enablePositionTransitions = true,
     failedVehicleTypes = EMPTY_FAILED_VEHICLE_TYPES,
     onScenegraphAssetError,
   }: ProductionScenegraphLayerOptions = {},
@@ -67,6 +70,9 @@ export function createProductionScenegraphLayers(
         getTranslation: getScenegraphTranslation,
         sizeScale: MODEL_SIZE_SCALES.bus,
         sizeMaxPixels: 220,
+        ...(enablePositionTransitions
+          ? { transitions: VEHICLE_POSITION_TRANSITION }
+          : {}),
         pickable: true,
         _lighting: 'pbr',
         onError: getScenegraphErrorHandler(
@@ -88,6 +94,9 @@ export function createProductionScenegraphLayers(
         getTranslation: getScenegraphTranslation,
         sizeScale: MODEL_SIZE_SCALES.train,
         sizeMaxPixels: 220,
+        ...(enablePositionTransitions
+          ? { transitions: VEHICLE_POSITION_TRANSITION }
+          : {}),
         pickable: true,
         _lighting: 'pbr',
         onError: getScenegraphErrorHandler(

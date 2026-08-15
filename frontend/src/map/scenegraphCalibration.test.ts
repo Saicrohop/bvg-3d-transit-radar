@@ -54,4 +54,35 @@ describe('scenegraph calibration fixtures', () => {
     expect(getScenegraphTranslation(northboundBus)).toEqual([0, 0, 6.293897])
     expect(getScenegraphTranslation(eastboundTrain)).toEqual([0, 0, 0])
   })
+
+  it('applies the measured Y-up calibration for the official tram and regional assets', () => {
+    const tram = {
+      latitude: 52.52,
+      longitude: 13.405,
+      heading: 270,
+      vehicleType: 'tram' as const,
+    }
+    const regional = {
+      latitude: 52.52,
+      longitude: 13.405,
+      heading: 45,
+      vehicleType: 'regional' as const,
+    }
+
+    expect(getCalibrationModelUrl(tram)).toBe('/models/bvg_tram.glb')
+    expect(getScenegraphOrientation(tram)).toEqual([0, -180, 90])
+    expect(getScenegraphSizeScale(tram)).toBe(22)
+    expect(getScenegraphTranslation(tram)).toEqual([
+      0, 0, 1.3463450148701668,
+    ])
+
+    expect(getCalibrationModelUrl(regional)).toBe(
+      '/models/regional_bahn.glb',
+    )
+    expect(getScenegraphOrientation(regional)).toEqual([0, 45, 90])
+    expect(getScenegraphSizeScale(regional)).toBe(9)
+    expect(getScenegraphTranslation(regional)).toEqual([
+      0, 0, 2.0698822885751724,
+    ])
+  })
 })

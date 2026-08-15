@@ -14,6 +14,7 @@ const firstPosition: EstimatedVehiclePosition = {
   vehicle_category: 's_bahn',
   trip_id: 'trip-42',
   route_id: 'route-7',
+  route_short_name: 'S41',
   longitude: 13.401,
   latitude: 52.501,
   bearing_degrees: 91.5,
@@ -40,6 +41,13 @@ describe('vehicle position state', () => {
         vehicle_category: 's_bahn',
       }),
     ).toBe(true)
+    expect(
+      isEstimatedVehiclePosition({
+        ...firstPosition,
+        vehicle_category: 'regional',
+        route_short_name: 'FEX',
+      }),
+    ).toBe(true)
     const legacyPositionWithoutCategory = {
       type: 'vehicle_position' as const,
       source: 'trip_update_interpolation' as const,
@@ -59,6 +67,7 @@ describe('vehicle position state', () => {
     expect(normalizeEstimatedVehiclePosition(legacyPositionWithoutCategory)).toEqual({
       ...legacyPositionWithoutCategory,
       vehicle_category: null,
+      route_short_name: null,
     })
     expect(
       isEstimatedVehiclePosition({
@@ -70,6 +79,12 @@ describe('vehicle position state', () => {
       isEstimatedVehiclePosition({
         ...firstPosition,
         vehicle_category: 'ferry',
+      }),
+    ).toBe(false)
+    expect(
+      isEstimatedVehiclePosition({
+        ...firstPosition,
+        route_short_name: 41,
       }),
     ).toBe(false)
     expect(isEstimatedVehiclePosition({ type: 'feed_message' })).toBe(false)

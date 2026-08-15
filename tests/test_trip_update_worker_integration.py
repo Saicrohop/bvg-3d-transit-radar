@@ -103,4 +103,7 @@ def test_worker_enriches_s41_and_publishes_its_category_in_websocket_json(
     assert database.arguments == ("trip-s41",)
     assert len(serialized_positions) == 1
     assert serialized_positions[0].vehicle_category == "s_bahn"
-    assert queue.get_nowait()["vehicle_category"] == "s_bahn"
+    assert serialized_positions[0].route_short_name == "S41"
+    event = queue.get_nowait()
+    assert event["vehicle_category"] == "s_bahn"
+    assert event["route_short_name"] == "S41"

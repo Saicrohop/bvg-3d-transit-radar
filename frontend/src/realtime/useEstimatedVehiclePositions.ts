@@ -4,8 +4,11 @@ import {
   isEstimatedVehiclePosition,
   normalizeEstimatedVehiclePosition,
   upsertVehiclePosition,
+  type EstimatedVehiclePosition,
   type VehiclePositionsByTrip,
 } from './vehiclePositions'
+
+export const POSITION_BATCH_QUIET_PERIOD_MS = 250
 
 export type WebSocketConnectionStatus =
   | 'connecting'
@@ -22,7 +25,22 @@ export function useEstimatedVehiclePositions(url: string) {
 
   useEffect(() => {
     let isCurrentConnection = true
+    let pendingFlush: ReturnType<typeof setTimeout> | null = null
+    const pendingEventsByTrip = new Map<string, EstimatedVehiclePosition>()
     const socket = new WebSocket(url)
+
+    const flushPendingEvents = () => {
+      pendingFlush = null
+      if (!isCurrentConnection || pendingEventsByTrip.size === 0) {
+        return
+      }
+
+      const events = [...pendingEventsByTrip.values()]
+      pendingEventsByTrip.clear()
+      setVehiclesByTrip((current) =>
+        events.reduce(upsertVehiclePosition, current),
+      )
+    }
 
     socket.onopen = () => {
       if (isCurrentConnection) {
@@ -31,8 +49,15 @@ export function useEstimatedVehiclePositions(url: string) {
     }
     socket.onmessage = (message) => {
       const event = parseEstimatedPosition(message.data)
-      if (event !== null) {
-        setVehiclesByTrip((current) => upsertVehiclePosition(current, event))
+      if (isCurrentConnection && event !== null) {
+        pendingEventsByTrip.set(event.trip_id, event)
+        if (pendingFlush !== null) {
+          clearTimeout(pendingFlush)
+        }
+        pendingFlush = setTimeout(
+          flushPendingEvents,
+          POSITION_BATCH_QUIET_PERIOD_MS,
+        )
       }
     }
     socket.onerror = () => {
@@ -48,6 +73,9 @@ export function useEstimatedVehiclePositions(url: string) {
 
     return () => {
       isCurrentConnection = false
+      if (pendingFlush !== null) {
+        clearTimeout(pendingFlush)
+      }
       socket.close()
     }
   }, [url])

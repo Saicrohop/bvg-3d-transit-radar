@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AmbientLight, DirectionalLight, LightingEffect } from '@deck.gl/core'
 import { MapboxOverlay } from '@deck.gl/mapbox'
-import type { Device } from '@luma.gl/core'
 import maplibregl, { type IControl } from 'maplibre-gl'
 
 import type { EstimatedVehiclePosition } from '../realtime/vehiclePositions'
@@ -42,18 +41,15 @@ function createProductionVehicleLayers(
   vehicles: readonly EstimatedVehiclePosition[],
   failedVehicleTypes: ReadonlySet<CalibrationVehicleType>,
   onScenegraphAssetError: ScenegraphAssetErrorHandler,
-  enablePositionTransitions: boolean,
 ) {
   return [
+    createVehiclePointLayer(
+      getProductionScenegraphFallbackVehicles(vehicles, failedVehicleTypes),
+    ),
     ...createProductionScenegraphLayers(vehicles, {
-      enablePositionTransitions,
       failedVehicleTypes,
       onScenegraphAssetError,
     }),
-    createVehiclePointLayer(
-      getProductionScenegraphFallbackVehicles(vehicles, failedVehicleTypes),
-      { enablePositionTransitions },
-    ),
   ]
 }
 
@@ -65,9 +61,6 @@ function RadarMapView({ vehicles }: RadarMapProps) {
   const [failedVehicleTypes, setFailedVehicleTypes] = useState<
     ReadonlySet<CalibrationVehicleType>
   >(() => new Set())
-  const [renderingDeviceType, setRenderingDeviceType] = useState<
-    Device['type'] | null
-  >(null)
   const container = useRef<HTMLDivElement | null>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const overlay = useRef<MapboxOverlay | null>(null)
@@ -83,25 +76,14 @@ function RadarMapView({ vehicles }: RadarMapProps) {
     },
     [],
   )
-  const reportDeckDevice = useCallback((device: Device) => {
-    reportDeckRenderingDevice(device)
-    setRenderingDeviceType(device.type)
-  }, [])
-  const enablePositionTransitions = renderingDeviceType === 'webgl'
   const vehicleLayers = useMemo(
     () =>
       createProductionVehicleLayers(
         vehicles,
         failedVehicleTypes,
         reportScenegraphAssetError,
-        enablePositionTransitions,
       ),
-    [
-      enablePositionTransitions,
-      failedVehicleTypes,
-      reportScenegraphAssetError,
-      vehicles,
-    ],
+    [failedVehicleTypes, reportScenegraphAssetError, vehicles],
   )
   const latestVehicleLayers = useRef(vehicleLayers)
   latestVehicleLayers.current = vehicleLayers
@@ -147,7 +129,7 @@ function RadarMapView({ vehicles }: RadarMapProps) {
       const deckOverlay = new MapboxOverlay({
         interleaved: false,
         deviceProps: createPreferredDeckDeviceProps(),
-        onDeviceInitialized: reportDeckDevice,
+        onDeviceInitialized: reportDeckRenderingDevice,
         layers: latestVehicleLayers.current,
         effects: SCENEGRAPH_EFFECTS,
       })
@@ -161,7 +143,7 @@ function RadarMapView({ vehicles }: RadarMapProps) {
       overlay.current = null
       mapInstance.remove()
     }
-  }, [reportDeckDevice, reportScenegraphAssetError])
+  }, [reportScenegraphAssetError])
 
   return <div ref={container} className="radar-map" aria-label="Mapa de Berlim" />
 }

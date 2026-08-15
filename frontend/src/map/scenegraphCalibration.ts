@@ -1,4 +1,4 @@
-export type CalibrationVehicleType = 'bus' | 'train'
+export type CalibrationVehicleType = 'bus' | 'train' | 'tram' | 'regional'
 
 export type ScenegraphVehicle = Readonly<{
   latitude: number
@@ -16,16 +16,22 @@ export type ScenegraphCalibrationVehicle = ScenegraphVehicle &
 export const MODEL_URLS: Readonly<Record<CalibrationVehicleType, string>> = {
   bus: '/models/bvg_bus.glb',
   train: '/models/s_bahn_db.glb',
+  tram: '/models/bvg_tram.glb',
+  regional: '/models/regional_bahn.glb',
 }
 
 const MODEL_YAW_OFFSETS: Readonly<Record<CalibrationVehicleType, number>> = {
   bus: 90,
   train: 180,
+  tram: 90,
+  regional: 90,
 }
 
 const MODEL_ROLL_OFFSETS: Readonly<Record<CalibrationVehicleType, number>> = {
   bus: 90,
   train: 90,
+  tram: 90,
+  regional: 90,
 }
 
 export const MODEL_SIZE_SCALES: Readonly<
@@ -33,6 +39,8 @@ export const MODEL_SIZE_SCALES: Readonly<
 > = {
   bus: 20,
   train: 0.75,
+  tram: 22,
+  regional: 9,
 }
 
 const MODEL_TRANSLATIONS: Readonly<
@@ -40,6 +48,8 @@ const MODEL_TRANSLATIONS: Readonly<
 > = {
   bus: [0, 0, 6.293897],
   train: [0, 0, 0],
+  tram: [0, 0, 1.3463450148701668],
+  regional: [0, 0, 2.0698822885751724],
 }
 
 export const MOCK_CALIBRATION_VEHICLES: readonly ScenegraphCalibrationVehicle[] = [

@@ -68,6 +68,25 @@ class CountingEstimator(MatchingEstimator):
         return await super().estimate(update, observed_at)
 
 
+class RecordingEstimator(MatchingEstimator):
+    def __init__(self, operations: list[str]) -> None:
+        self._operations = operations
+
+    async def estimate(
+        self, update: TripUpdate, observed_at: datetime
+    ) -> EstimatedVehiclePosition | None:
+        self._operations.append("estimate")
+        return await super().estimate(update, observed_at)
+
+
+class RecordingPublisher:
+    def __init__(self, operations: list[str]) -> None:
+        self._operations = operations
+
+    async def publish(self, _event: dict[str, object]) -> None:
+        self._operations.append("publish")
+
+
 def trip_update(trip_id: str) -> TripUpdate:
     return TripUpdate(
         entity_id=f"entity-{trip_id}",
@@ -99,6 +118,7 @@ def test_worker_publishes_estimated_vehicle_position_contract() -> None:
         "source": "trip_update_interpolation",
         "is_estimated": True,
         "vehicle_category": None,
+        "route_short_name": None,
         "entity_id": "entity-trip-42",
         "trip_id": "trip-42",
         "route_id": "route-7",
@@ -136,6 +156,25 @@ def test_worker_stops_scanning_after_the_requested_position_limit() -> None:
     assert result.estimated_positions_published == 1
     assert estimator.calls == 1
     assert queue.qsize() == 1
+
+
+def test_worker_finishes_estimation_before_publishing_the_position_batch() -> None:
+    operations: list[str] = []
+    worker = TripUpdateIngestionWorker(
+        source=StaticSource((trip_update("trip-42"), trip_update("trip-42"))),
+        estimator=RecordingEstimator(operations),
+        route_metadata_lookup=MissingRouteMetadataLookup(),
+        publisher=RecordingPublisher(operations),
+    )
+
+    result = asyncio.run(
+        worker.run_once(
+            observed_at=datetime(2026, 7, 19, 10, 0, tzinfo=timezone.utc)
+        )
+    )
+
+    assert result.estimated_positions_published == 2
+    assert operations == ["estimate", "estimate", "publish", "publish"]
 
 
 async def receive_after_a_transient_source_failure() -> tuple[dict[str, object], int]:

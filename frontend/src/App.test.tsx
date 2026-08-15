@@ -28,6 +28,7 @@ const vehicle = {
   vehicle_category: 's_bahn' as const,
   trip_id: 'trip-42',
   route_id: 'route-7',
+  route_short_name: 'S41',
   longitude: 13.405,
   latitude: 52.52,
   bearing_degrees: 91.5,

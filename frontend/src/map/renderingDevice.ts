@@ -1,10 +1,8 @@
 import type { CreateDeviceProps, Device } from '@luma.gl/core'
-import { webgpuAdapter } from '@luma.gl/webgpu'
 
 export function createPreferredDeckDeviceProps(): CreateDeviceProps {
   return {
-    type: 'best-available',
-    adapters: [webgpuAdapter],
+    type: 'webgl',
     powerPreference: 'high-performance',
     createCanvasContext: { alphaMode: 'premultiplied' },
   }

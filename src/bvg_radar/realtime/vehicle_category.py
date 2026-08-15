@@ -1,6 +1,6 @@
 from typing import Literal
 
-VehicleCategory = Literal["u_bahn", "s_bahn", "bus", "tram"]
+VehicleCategory = Literal["u_bahn", "s_bahn", "bus", "tram", "regional"]
 
 
 def classify_berlin_vehicle(
@@ -16,6 +16,8 @@ def classify_berlin_vehicle(
         and route_short_name.startswith("S")
     ):
         return "s_bahn"
+    if route_type == 100:
+        return "regional"
     if route_type in (3, 700):
         return "bus"
     if route_type in (0, 900):

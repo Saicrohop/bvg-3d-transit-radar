@@ -79,6 +79,7 @@ const vehicle = {
   vehicle_category: 's_bahn' as const,
   trip_id: 'trip-42',
   route_id: 'route-7',
+  route_short_name: 'S41',
   longitude: 13.405,
   latitude: 52.52,
   bearing_degrees: 91.5,
@@ -117,21 +118,48 @@ describe('RadarMap', () => {
     const overlay = mapRuntime.overlays.at(-1)
     const layers = overlay?.props.layers as Array<{
       id: string
-      props: { data: readonly { trip_id: string }[] }
+      props: {
+        data: readonly { trip_id: string }[]
+        transitions?: { getPosition: number }
+      }
     }>
 
     expect(layers.map((layer) => layer.id)).toEqual([
+      'estimated-vehicle-points',
       'estimated-generic-vehicles-3d',
       'estimated-s-bahn-3d',
-      'estimated-vehicle-points',
+      'estimated-trams-3d',
+      'estimated-regional-3d',
+      'vehicle-labels',
     ])
     expect(overlay?.props.effects).toHaveLength(1)
     expect(overlay?.props.interleaved).toBe(false)
     expect(overlay?.props.deviceProps).toMatchObject({
-      type: 'best-available',
+      type: 'webgl',
       createCanvasContext: { alphaMode: 'premultiplied' },
     })
     expect(overlay?.props.onDeviceInitialized).toEqual(expect.any(Function))
+    expect(
+      layers
+        .filter((layer) =>
+          [
+            'estimated-generic-vehicles-3d',
+            'estimated-s-bahn-3d',
+            'estimated-trams-3d',
+            'estimated-regional-3d',
+            'vehicle-labels',
+            'estimated-vehicle-points',
+          ].includes(layer.id),
+        )
+        .map((layer) => layer.props.transitions),
+    ).toEqual([
+      { getPosition: 1000 },
+      { getPosition: 1000 },
+      { getPosition: 1000 },
+      { getPosition: 1000 },
+      { getPosition: 1000 },
+      { getPosition: 1000 },
+    ])
     expect(
       layers.find((layer) => layer.id === 'estimated-s-bahn-3d')?.props
         .data,
@@ -139,6 +167,14 @@ describe('RadarMap', () => {
     expect(
       layers.find((layer) => layer.id === 'estimated-vehicle-points')?.props.data,
     ).toEqual([uncategorizedVehicle])
+    expect(
+      layers.find((layer) => layer.id === 'vehicle-labels')?.props.data,
+    ).toEqual([
+      expect.objectContaining({
+        trip_id: vehicle.trip_id,
+        route_short_name: vehicle.route_short_name,
+      }),
+    ])
     expect(layers.map((layer) => layer.id)).not.toContain('mock-trains-3d')
 
     view.unmount()

@@ -17,6 +17,10 @@ def test_classifies_vbb_s41_suburban_rail_as_s_bahn() -> None:
     assert classify_berlin_vehicle(route_type=109, route_short_name="S41") == "s_bahn"
 
 
+def test_classifies_vbb_regional_rail_service_as_regional() -> None:
+    assert classify_berlin_vehicle(route_type=100, route_short_name="FEX") == "regional"
+
+
 def test_classifies_bus_route_as_bus() -> None:
     assert classify_berlin_vehicle(route_type=3, route_short_name="100") == "bus"
 

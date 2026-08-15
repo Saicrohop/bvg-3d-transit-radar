@@ -1,3 +1,4 @@
+import { TextLayer } from '@deck.gl/layers'
 import { ScenegraphLayer } from '@deck.gl/mesh-layers'
 
 import type {
@@ -25,27 +26,36 @@ export type ScenegraphAssetErrorHandler = (
 ) => void
 
 export type ProductionScenegraphLayerOptions = Readonly<{
-  enablePositionTransitions?: boolean
   failedVehicleTypes?: ReadonlySet<CalibrationVehicleType>
   onScenegraphAssetError?: ScenegraphAssetErrorHandler
 }>
 
 const EMPTY_FAILED_VEHICLE_TYPES: ReadonlySet<CalibrationVehicleType> = new Set()
 const VEHICLE_POSITION_TRANSITION = { getPosition: 1000 } as const
+const LABEL_COLOR = [255, 255, 255] as const
+const LABEL_OUTLINE_COLOR = [0, 0, 0, 255] as const
+const LABEL_ELEVATION_BY_VEHICLE_TYPE: Readonly<
+  Record<CalibrationVehicleType, number>
+> = {
+  bus: 15,
+  regional: 6,
+  train: 2,
+  tram: 5,
+}
 
 const MODEL_TYPE_BY_CATEGORY: Readonly<
   Record<VehicleCategory, CalibrationVehicleType>
 > = {
   bus: 'bus',
+  regional: 'regional',
   s_bahn: 'train',
-  tram: 'bus',
+  tram: 'tram',
   u_bahn: 'bus',
 }
 
 export function createProductionScenegraphLayers(
   vehicles: readonly EstimatedVehiclePosition[],
   {
-    enablePositionTransitions = true,
     failedVehicleTypes = EMPTY_FAILED_VEHICLE_TYPES,
     onScenegraphAssetError,
   }: ProductionScenegraphLayerOptions = {},
@@ -57,7 +67,17 @@ export function createProductionScenegraphLayers(
   const sBahnVehicles = scenegraphVehicles.filter(
     (vehicle) => vehicle.vehicleType === 'train',
   )
-  const layers: Array<ScenegraphLayer<ProductionScenegraphVehicle>> = []
+  const tramVehicles = scenegraphVehicles.filter(
+    (vehicle) => vehicle.vehicleType === 'tram',
+  )
+  const regionalVehicles = scenegraphVehicles.filter(
+    (vehicle) => vehicle.vehicleType === 'regional',
+  )
+  const labelVehicles = scenegraphVehicles.filter(hasValidRouteShortName)
+  const layers: Array<
+    | ScenegraphLayer<ProductionScenegraphVehicle>
+    | TextLayer<ProductionScenegraphVehicle>
+  > = []
 
   if (!failedVehicleTypes.has('bus')) {
     layers.push(
@@ -70,9 +90,7 @@ export function createProductionScenegraphLayers(
         getTranslation: getScenegraphTranslation,
         sizeScale: MODEL_SIZE_SCALES.bus,
         sizeMaxPixels: 220,
-        ...(enablePositionTransitions
-          ? { transitions: VEHICLE_POSITION_TRANSITION }
-          : {}),
+        transitions: VEHICLE_POSITION_TRANSITION,
         pickable: true,
         _lighting: 'pbr',
         onError: getScenegraphErrorHandler(
@@ -94,9 +112,7 @@ export function createProductionScenegraphLayers(
         getTranslation: getScenegraphTranslation,
         sizeScale: MODEL_SIZE_SCALES.train,
         sizeMaxPixels: 220,
-        ...(enablePositionTransitions
-          ? { transitions: VEHICLE_POSITION_TRANSITION }
-          : {}),
+        transitions: VEHICLE_POSITION_TRANSITION,
         pickable: true,
         _lighting: 'pbr',
         onError: getScenegraphErrorHandler(
@@ -106,6 +122,77 @@ export function createProductionScenegraphLayers(
       }),
     )
   }
+
+  if (!failedVehicleTypes.has('tram')) {
+    layers.push(
+      new ScenegraphLayer<ProductionScenegraphVehicle>({
+        id: 'estimated-trams-3d',
+        data: tramVehicles,
+        scenegraph: MODEL_URLS.tram,
+        getPosition: getScenegraphPosition,
+        getOrientation: getScenegraphOrientation,
+        getTranslation: getScenegraphTranslation,
+        sizeScale: MODEL_SIZE_SCALES.tram,
+        sizeMaxPixels: 220,
+        transitions: VEHICLE_POSITION_TRANSITION,
+        pickable: true,
+        _lighting: 'pbr',
+        onError: getScenegraphErrorHandler(
+          onScenegraphAssetError,
+          'tram',
+        ),
+      }),
+    )
+  }
+
+  if (!failedVehicleTypes.has('regional')) {
+    layers.push(
+      new ScenegraphLayer<ProductionScenegraphVehicle>({
+        id: 'estimated-regional-3d',
+        data: regionalVehicles,
+        scenegraph: MODEL_URLS.regional,
+        getPosition: getScenegraphPosition,
+        getOrientation: getScenegraphOrientation,
+        getTranslation: getScenegraphTranslation,
+        sizeScale: MODEL_SIZE_SCALES.regional,
+        sizeMaxPixels: 220,
+        transitions: VEHICLE_POSITION_TRANSITION,
+        pickable: true,
+        _lighting: 'pbr',
+        onError: getScenegraphErrorHandler(
+          onScenegraphAssetError,
+          'regional',
+        ),
+      }),
+    )
+  }
+
+  layers.push(
+    new TextLayer<ProductionScenegraphVehicle>({
+      id: 'vehicle-labels',
+      data: labelVehicles,
+      getPosition: getVehicleLabelPosition,
+      getText: (vehicle) => vehicle.route_short_name ?? '',
+      getSize: 16,
+      getColor: LABEL_COLOR,
+      billboard: true,
+      getTextAnchor: 'middle',
+      getAlignmentBaseline: 'bottom',
+      fontSettings: {
+        sdf: true,
+        fontSize: 64,
+        buffer: 4,
+      },
+      outlineWidth: 2,
+      outlineColor: LABEL_OUTLINE_COLOR,
+      parameters: {
+        depthWriteEnabled: false,
+        depthCompare: 'always',
+      },
+      transitions: VEHICLE_POSITION_TRANSITION,
+      pickable: false,
+    }),
+  )
 
   return layers
 }
@@ -160,4 +247,23 @@ function getScenegraphErrorHandler(
     onScenegraphAssetError(vehicleType, error)
     return true
   }
+}
+
+function hasValidRouteShortName(
+  vehicle: ProductionScenegraphVehicle,
+): boolean {
+  return (
+    vehicle.route_short_name !== null &&
+    vehicle.route_short_name.trim().length > 0
+  )
+}
+
+function getVehicleLabelPosition(
+  vehicle: ProductionScenegraphVehicle,
+): [number, number, number] {
+  return [
+    vehicle.longitude,
+    vehicle.latitude,
+    LABEL_ELEVATION_BY_VEHICLE_TYPE[vehicle.vehicleType],
+  ]
 }

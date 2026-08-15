@@ -28,6 +28,7 @@ class EstimatedVehiclePosition:
     speed_mps: float
     observed_at: datetime
     vehicle_category: VehicleCategory | None = None
+    route_short_name: str | None = None
 
     def to_websocket_event(self) -> dict[str, object]:
         """Return the future WebSocket payload without coupling to FastAPI."""
@@ -36,6 +37,7 @@ class EstimatedVehiclePosition:
             "source": "trip_update_interpolation",
             "is_estimated": True,
             "vehicle_category": self.vehicle_category,
+            "route_short_name": self.route_short_name,
             "entity_id": self.entity_id,
             "trip_id": self.trip_id,
             "route_id": self.route_id,

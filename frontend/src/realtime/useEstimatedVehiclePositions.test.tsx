@@ -3,7 +3,10 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { useEstimatedVehiclePositions } from './useEstimatedVehiclePositions'
+import {
+  POSITION_BATCH_QUIET_PERIOD_MS,
+  useEstimatedVehiclePositions,
+} from './useEstimatedVehiclePositions'
 
 const firstEvent = {
   type: 'vehicle_position',
@@ -12,6 +15,7 @@ const firstEvent = {
   vehicle_category: 's_bahn',
   trip_id: 'trip-42',
   route_id: 'route-7',
+  route_short_name: 'S41',
   longitude: 13.401,
   latitude: 52.501,
   bearing_degrees: 91.5,
@@ -53,10 +57,12 @@ class FakeWebSocket {
 describe('useEstimatedVehiclePositions', () => {
   beforeEach(() => {
     FakeWebSocket.instances = []
+    vi.useFakeTimers()
     vi.stubGlobal('WebSocket', FakeWebSocket)
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
@@ -69,6 +75,7 @@ describe('useEstimatedVehiclePositions', () => {
     act(() => {
       socket.emitJson(firstEvent)
       socket.emitJson({ ...firstEvent, longitude: 13.405, latitude: 52.52 })
+      vi.advanceTimersByTime(POSITION_BATCH_QUIET_PERIOD_MS)
     })
 
     expect(result.current.vehicles).toEqual([
@@ -87,10 +94,60 @@ describe('useEstimatedVehiclePositions', () => {
 
     act(() => {
       socket.emitJson(legacyEventWithoutCategory)
+      vi.advanceTimersByTime(POSITION_BATCH_QUIET_PERIOD_MS)
     })
 
     expect(result.current.vehicles).toEqual([
-      { ...legacyEventWithoutCategory, vehicle_category: null },
+      {
+        ...legacyEventWithoutCategory,
+        vehicle_category: null,
+        route_short_name: null,
+      },
     ])
+  })
+
+  it('publishes a WebSocket burst once after the quiet period', () => {
+    let renderCount = 0
+    const { result } = renderHook(() => {
+      renderCount += 1
+      return useEstimatedVehiclePositions(
+        'ws://127.0.0.1:8000/ws/positions',
+      )
+    })
+    const socket = FakeWebSocket.instances[0]
+
+    act(() => {
+      socket.emitJson(firstEvent)
+      socket.emitJson({
+        ...firstEvent,
+        trip_id: 'trip-43',
+        route_short_name: 'S42',
+      })
+      socket.emitJson({ ...firstEvent, longitude: 13.405, latitude: 52.52 })
+    })
+
+    expect(result.current.vehicles).toEqual([])
+    expect(renderCount).toBe(1)
+
+    act(() => {
+      vi.advanceTimersByTime(POSITION_BATCH_QUIET_PERIOD_MS - 1)
+    })
+
+    expect(result.current.vehicles).toEqual([])
+    expect(renderCount).toBe(1)
+
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+
+    expect(result.current.vehicles).toEqual([
+      { ...firstEvent, longitude: 13.405, latitude: 52.52 },
+      {
+        ...firstEvent,
+        trip_id: 'trip-43',
+        route_short_name: 'S42',
+      },
+    ])
+    expect(renderCount).toBe(2)
   })
 })

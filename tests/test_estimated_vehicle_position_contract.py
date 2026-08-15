@@ -21,4 +21,6 @@ def test_estimated_vehicle_position_defaults_vehicle_category_to_none() -> None:
     )
 
     assert position.vehicle_category is None
+    assert position.route_short_name is None
     assert position.to_websocket_event()["vehicle_category"] is None
+    assert position.to_websocket_event()["route_short_name"] is None

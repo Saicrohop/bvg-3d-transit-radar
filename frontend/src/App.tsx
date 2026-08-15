@@ -65,7 +65,7 @@ function RealtimeRadarView() {
             : 'veículos categorizados em 3D'}
         </span>
         <div className="estimated-notice">
-          S-Bahn · U-Bahn · ônibus · tram estimados
+          S-Bahn · Regional · U-Bahn · ônibus · tram estimados
         </div>
       </aside>
 

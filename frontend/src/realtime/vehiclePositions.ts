@@ -1,4 +1,10 @@
-export const VEHICLE_CATEGORIES = ['u_bahn', 's_bahn', 'bus', 'tram'] as const
+export const VEHICLE_CATEGORIES = [
+  'u_bahn',
+  's_bahn',
+  'bus',
+  'tram',
+  'regional',
+] as const
 
 export type VehicleCategory = (typeof VEHICLE_CATEGORIES)[number]
 
@@ -9,6 +15,7 @@ export type EstimatedVehiclePosition = Readonly<{
   vehicle_category: VehicleCategory | null
   trip_id: string
   route_id: string
+  route_short_name: string | null
   longitude: number
   latitude: number
   bearing_degrees: number
@@ -16,8 +23,9 @@ export type EstimatedVehiclePosition = Readonly<{
 }>
 
 export type EstimatedVehiclePositionPayload = Readonly<
-  Omit<EstimatedVehiclePosition, 'vehicle_category'> & {
+  Omit<EstimatedVehiclePosition, 'route_short_name' | 'vehicle_category'> & {
     vehicle_category?: VehicleCategory | null
+    route_short_name?: string | null
   }
 >
 
@@ -42,6 +50,7 @@ export function isEstimatedVehiclePosition(
     event.trip_id.length > 0 &&
     typeof event.route_id === 'string' &&
     event.route_id.length > 0 &&
+    isOptionalRouteShortName(event.route_short_name) &&
     isFiniteNumber(event.longitude) &&
     isFiniteNumber(event.latitude) &&
     isFiniteNumber(event.bearing_degrees) &&
@@ -55,6 +64,7 @@ export function normalizeEstimatedVehiclePosition(
   return {
     ...position,
     vehicle_category: position.vehicle_category ?? null,
+    route_short_name: position.route_short_name ?? null,
   }
 }
 
@@ -77,4 +87,14 @@ function isOptionalVehicleCategory(
   value: unknown,
 ): value is VehicleCategory | null | undefined {
   return value === undefined || isVehicleCategory(value)
+}
+
+function isOptionalRouteShortName(
+  value: unknown,
+): value is string | null | undefined {
+  return (
+    value === undefined ||
+    value === null ||
+    (typeof value === 'string' && value.length > 0)
+  )
 }

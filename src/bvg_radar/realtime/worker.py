@@ -75,13 +75,16 @@ class TripUpdateIngestionWorker:
             raise ValueError("max_positions must be positive when provided")
 
         updates = await self._source.fetch_trip_updates()
-        published = 0
+        events_to_publish: list[dict[str, object]] = []
         for update in updates:
             estimate = await self._estimator.estimate(update, observed_at)
             if estimate is None:
                 continue
             metadata = await self._route_metadata_lookup.find_by_trip_id(
                 estimate.trip_id
+            )
+            route_short_name = (
+                None if metadata is None else metadata.route_short_name
             )
             category = (
                 None
@@ -91,14 +94,24 @@ class TripUpdateIngestionWorker:
                     metadata.route_short_name,
                 )
             )
-            estimate = replace(estimate, vehicle_category=category)
-            await self._publisher.publish(estimate.to_websocket_event())
-            published += 1
-            if max_positions is not None and published >= max_positions:
+            estimate = replace(
+                estimate,
+                vehicle_category=category,
+                route_short_name=route_short_name,
+            )
+            events_to_publish.append(estimate.to_websocket_event())
+            if (
+                max_positions is not None
+                and len(events_to_publish) >= max_positions
+            ):
                 break
+
+        for event in events_to_publish:
+            await self._publisher.publish(event)
+
         return IngestionRunResult(
             trip_updates_received=len(updates),
-            estimated_positions_published=published,
+            estimated_positions_published=len(events_to_publish),
         )
 
     async def run_forever(

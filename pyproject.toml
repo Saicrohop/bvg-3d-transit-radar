@@ -22,6 +22,7 @@ packages = ["src/bvg_radar"]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.12.0",
     "pytest>=8.3,<9",
 ]
 

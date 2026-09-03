@@ -117,6 +117,56 @@ A saída é JSON Lines semelhante a:
 
 O cliente nunca acessa VBB GTFS-Realtime diretamente e não recebe Protobuf.
 
+## Gate de compatibilidade GTFS
+
+Antes de importar ou usar um snapshot GTFS estático, compare seus `trip_id`s
+com um snapshot atual do GTFS-Realtime VBB:
+
+```bash
+npm run gtfs:check-compatibility
+```
+
+O comando não altera arquivos nem o banco. Ele valida o status HTTP, o
+`Content-Type` Protobuf e o corpo da resposta, separa viagens `SCHEDULED` e
+`CANCELED` das relações excepcionais (`ADDED`, `DUPLICATED` e `UNSCHEDULED`) e
+confirma os `route_id`s encontrados. A saída JSON inclui o timestamp do feed,
+o parâmetro `schedule_sha256` quando fornecido pelo VBB, contagens e amostras
+limitadas de incompatibilidades.
+
+O gate retorna `0` somente quando pelo menos 99% das viagens `SCHEDULED` têm
+correspondência em `data/gtfs-static/GTFS/trips.txt`; retorna `1` para snapshot
+incompatível e `2` para erro operacional ou entrada inválida. Como o feed é
+dinâmico, as contagens exatas variam entre execuções.
+
+## Atualização do GTFS estático VBB
+
+O VBB publica o arquivo GTFS estático oficial em `https://unternehmen.vbb.de/gtfs`
+(atualizado duas vezes por semana). O script de atualização:
+
+1. Baixa o ZIP em streaming com `aiohttp`, calculando SHA-256 do arquivo;
+2. Extrai em staging isolado com defesa contra *Zip Slip*;
+3. Valida os cinco arquivos obrigatórios (`routes.txt`, `trips.txt`, `stops.txt`,
+   `shapes.txt`, `stop_times.txt`) e seus cabeçalhos;
+4. Verifica se `calendar.txt` fornece intervalo de datas válido;
+5. Gera manifest JSON de proveniência (URL, timestamp, SHA-256 do arquivo,
+   SHA-256 por arquivo, intervalo do calendário);
+6. Troca o snapshot antigo de forma atômica (`staging.replace(output)`);
+7. Mantém o ZIP apenas com `--keep-archive`.
+
+```bash
+npm run gtfs:update-static
+```
+
+Saída JSON (com `--json`) inclui o manifest completo e `status: "installed"`.
+O comando falha com exit `2` se download, validação ou troca não puderem ser
+concluídos.
+
+Após a atualização, repita o gate de compatibilidade:
+
+```bash
+npm run gtfs:check-compatibility
+```
+
 ## Testes de regressão
 
 ```bash

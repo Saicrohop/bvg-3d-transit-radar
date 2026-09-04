@@ -19,21 +19,25 @@ from .realtime.source import SUPPORTED_PROTOBUF_MEDIA_TYPES
 CompatibilityChecker = Callable[
     [str, Path, int], Awaitable["GtfsCompatibilityReport"]
 ]
+MAX_GTFS_REALTIME_BYTES = 64 * 1024 * 1024
 
 
 class GtfsCompatibilityError(ValueError):
     """Raised when compatibility inputs cannot be validated."""
 
 
+class _HttpContent(Protocol):
+    def iter_chunked(self, chunk_size: int): ...
+
+
 class _HttpResponse(Protocol):
     status: int
     headers: dict[str, str]
+    content: _HttpContent
 
     async def __aenter__(self) -> "_HttpResponse": ...
 
     async def __aexit__(self, *_arguments: object) -> None: ...
-
-    async def read(self) -> bytes: ...
 
 
 class _HttpSession(Protocol):
@@ -54,6 +58,7 @@ class GtfsCompatibilityReport:
     schedule_hash: str | None
     total_trip_updates: int
     scheduled_trip_updates: int
+    unique_scheduled_trip_ids: int
     matched_scheduled_trip_ids: int
     unmatched_scheduled_trip_ids: int
     scheduled_match_ratio: float
@@ -82,15 +87,15 @@ def analyze_gtfs_compatibility(
     relationship = gtfs_realtime_pb2.TripDescriptor.ScheduleRelationship
     total_trip_updates = 0
     scheduled_trip_updates = 0
+    scheduled_trip_ids: set[str] = set()
     matched_scheduled_trip_ids = 0
     unmatched_scheduled_trip_ids = 0
     canceled_trip_updates = 0
     matched_canceled_trip_ids = 0
     unmatched_canceled_trip_ids = 0
     exempt_non_scheduled_trip_ids = 0
-    matched_route_ids = 0
-    mismatched_route_ids = 0
-    missing_route_ids = 0
+    matched_route_id_candidates: set[str] = set()
+    missing_route_id_candidates: set[str] = set()
     unmatched_sample_candidates: set[str] = set()
     route_mismatch_candidates: dict[str, dict[str, str]] = {}
 
@@ -98,16 +103,22 @@ def analyze_gtfs_compatibility(
         descriptor: gtfs_realtime_pb2.TripDescriptor,
         trip_id: str,
     ) -> None:
-        nonlocal matched_route_ids, mismatched_route_ids, missing_route_ids
         realtime_route_id = (
             descriptor.route_id if descriptor.HasField("route_id") else ""
         )
         if not realtime_route_id:
-            missing_route_ids += 1
+            if (
+                trip_id not in route_mismatch_candidates
+                and trip_id not in matched_route_id_candidates
+            ):
+                missing_route_id_candidates.add(trip_id)
         elif realtime_route_id == static_trip_routes[trip_id]:
-            matched_route_ids += 1
+            if trip_id not in route_mismatch_candidates:
+                matched_route_id_candidates.add(trip_id)
+                missing_route_id_candidates.discard(trip_id)
         else:
-            mismatched_route_ids += 1
+            matched_route_id_candidates.discard(trip_id)
+            missing_route_id_candidates.discard(trip_id)
             route_mismatch_candidates[trip_id] = {
                 "trip_id": trip_id,
                 "realtime_route_id": realtime_route_id,
@@ -125,13 +136,17 @@ def analyze_gtfs_compatibility(
 
         if schedule_relationship == relationship.SCHEDULED:
             scheduled_trip_updates += 1
-            if trip_id and trip_id in static_trip_routes:
-                matched_scheduled_trip_ids += 1
+            if not trip_id:
+                continue
+            is_new_scheduled_trip = trip_id not in scheduled_trip_ids
+            scheduled_trip_ids.add(trip_id)
+            if trip_id in static_trip_routes:
+                if is_new_scheduled_trip:
+                    matched_scheduled_trip_ids += 1
                 compare_route_id(descriptor, trip_id)
-            else:
+            elif is_new_scheduled_trip:
                 unmatched_scheduled_trip_ids += 1
-                if trip_id:
-                    unmatched_sample_candidates.add(trip_id)
+                unmatched_sample_candidates.add(trip_id)
         elif schedule_relationship == relationship.CANCELED:
             canceled_trip_updates += 1
             if trip_id and trip_id in static_trip_routes:
@@ -142,9 +157,10 @@ def analyze_gtfs_compatibility(
         else:
             exempt_non_scheduled_trip_ids += 1
 
+    unique_scheduled_trip_ids = len(scheduled_trip_ids)
     scheduled_match_ratio = (
-        matched_scheduled_trip_ids / scheduled_trip_updates
-        if scheduled_trip_updates
+        matched_scheduled_trip_ids / unique_scheduled_trip_ids
+        if unique_scheduled_trip_ids
         else 0.0
     )
     feed_timestamp = (
@@ -156,6 +172,7 @@ def analyze_gtfs_compatibility(
         schedule_hash=schedule_hash,
         total_trip_updates=total_trip_updates,
         scheduled_trip_updates=scheduled_trip_updates,
+        unique_scheduled_trip_ids=unique_scheduled_trip_ids,
         matched_scheduled_trip_ids=matched_scheduled_trip_ids,
         unmatched_scheduled_trip_ids=unmatched_scheduled_trip_ids,
         scheduled_match_ratio=scheduled_match_ratio,
@@ -163,9 +180,9 @@ def analyze_gtfs_compatibility(
         matched_canceled_trip_ids=matched_canceled_trip_ids,
         unmatched_canceled_trip_ids=unmatched_canceled_trip_ids,
         exempt_non_scheduled_trip_ids=exempt_non_scheduled_trip_ids,
-        matched_route_ids=matched_route_ids,
-        mismatched_route_ids=mismatched_route_ids,
-        missing_route_ids=missing_route_ids,
+        matched_route_ids=len(matched_route_id_candidates),
+        mismatched_route_ids=len(route_mismatch_candidates),
+        missing_route_ids=len(missing_route_id_candidates),
         unmatched_scheduled_trip_id_sample=tuple(
             sorted(unmatched_sample_candidates)[:sample_limit]
         ),
@@ -178,16 +195,34 @@ def analyze_gtfs_compatibility(
 
 def load_static_trip_routes(trips_file: Path) -> dict[str, str]:
     """Load the GTFS trip-to-route relationship from trips.txt."""
-    with trips_file.open(encoding="utf-8-sig", newline="") as handle:
-        reader = csv.DictReader(handle)
-        if not {"route_id", "trip_id"}.issubset(reader.fieldnames or ()):
-            raise GtfsCompatibilityError(
-                "trips.txt must contain columns: route_id, trip_id"
-            )
-        return {
-            row["trip_id"].strip(): row["route_id"].strip()
-            for row in reader
-        }
+    try:
+        with trips_file.open(encoding="utf-8-sig", newline="") as handle:
+            reader = csv.DictReader(handle, strict=True)
+            if not {"route_id", "trip_id"}.issubset(reader.fieldnames or ()):
+                raise GtfsCompatibilityError(
+                    "trips.txt must contain columns: route_id, trip_id"
+                )
+
+            trip_routes: dict[str, str] = {}
+            for row_number, row in enumerate(reader, start=2):
+                trip_id = (row.get("trip_id") or "").strip()
+                route_id = (row.get("route_id") or "").strip()
+                if not trip_id:
+                    raise GtfsCompatibilityError(
+                        f"trips.txt contains a blank trip_id at row {row_number}"
+                    )
+                if trip_id in trip_routes and trip_routes[trip_id] != route_id:
+                    raise GtfsCompatibilityError(
+                        f"trips.txt has conflicting routes for trip_id {trip_id}"
+                    )
+                trip_routes[trip_id] = route_id
+            return trip_routes
+    except GtfsCompatibilityError:
+        raise
+    except (UnicodeError, csv.Error) as error:
+        raise GtfsCompatibilityError(
+            f"Cannot parse static GTFS trips.txt: {error}"
+        ) from error
 
 
 def decode_gtfs_realtime_feed(payload: bytes) -> gtfs_realtime_pb2.FeedMessage:
@@ -218,8 +253,12 @@ def schedule_hash_from_content_type(content_type: str) -> str | None:
 async def fetch_gtfs_realtime_payload(
     session: _HttpSession,
     feed_url: str,
+    *,
+    max_bytes: int = MAX_GTFS_REALTIME_BYTES,
 ) -> FetchedGtfsRealtimePayload:
-    """Fetch one GTFS-RT payload while preserving VBB schedule metadata."""
+    """Fetch one bounded GTFS-RT payload while preserving VBB metadata."""
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be positive")
     async with session.get(
         feed_url,
         headers={"User-Agent": "bvg-3d-radar/1.0"},
@@ -235,11 +274,17 @@ async def fetch_gtfs_realtime_payload(
                 "Unexpected GTFS-RT Content-Type: "
                 f"{media_type or '<missing>'}"
             )
-        payload = await response.read()
-        if not payload:
+        payload_buffer = bytearray()
+        async for chunk in response.content.iter_chunked(1024 * 1024):
+            if len(payload_buffer) + len(chunk) > max_bytes:
+                raise GtfsCompatibilityError(
+                    f"GTFS-RT payload exceeds {max_bytes} bytes"
+                )
+            payload_buffer.extend(chunk)
+        if not payload_buffer:
             raise GtfsCompatibilityError("GTFS-RT payload is empty")
     return FetchedGtfsRealtimePayload(
-        payload=payload,
+        payload=bytes(payload_buffer),
         schedule_hash=schedule_hash_from_content_type(content_type),
     )
 

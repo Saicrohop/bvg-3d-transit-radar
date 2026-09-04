@@ -56,6 +56,55 @@ local com:
 npm run gtfs:import-local
 ```
 
+### Atualizar o snapshot GTFS estático com segurança
+
+Antes de trocar os CSVs, registre o diagnóstico do snapshot atual:
+
+```bash
+npm run gtfs:check-compatibility
+```
+
+Atualize a partir da fonte oficial VBB com:
+
+```bash
+npm run gtfs:update-static
+```
+
+O atualizador baixa o ZIP para um arquivo temporário, valida os cabeçalhos e o
+calendário em staging, calcula checksums e compara o `trips.txt` candidato com
+um snapshot GTFS-RT. A promoção exige, por padrão:
+
+- timestamp presente e idade máxima de 900 segundos;
+- tolerância máxima de 120 segundos para timestamp futuro;
+- ao menos 1.000 `trip_id` `SCHEDULED` únicos;
+- data do feed coberta pelo calendário em `Europe/Berlin`;
+- ao menos 99% de correspondência dos IDs únicos;
+- nenhuma divergência confirmada de `route_id`.
+
+Os três limites operacionais podem ser passados explicitamente:
+
+```bash
+npm run gtfs:update-static -- \
+  --minimum-unique-scheduled-trips 1000 \
+  --max-feed-age-seconds 900 \
+  --max-future-skew-seconds 120
+```
+
+A saída JSON registra a política efetiva em `compatibility_policy`. O manifest
+instalado registra os timestamps UTC de download e instalação, recalcula o
+SHA-256 do ZIP no ponto de instalação e inclui o SHA-256 de todos os arquivos
+regulares. Ele também persiste, em `compatibility`, o instante da checagem, idade
+e data operacional do feed, a política aplicada e o relatório completo
+(incluindo contagens brutas, IDs únicos, cancelamentos, exceções, `route_id` e
+amostras limitadas). Assim, a decisão de promoção pode ser auditada sem depender
+da saída do terminal. Durante a promoção, o diretório anterior é mantido como
+backup temporário e restaurado se a troca do snapshot ou do manifest falhar.
+ZIP, CSVs e manifest continuam locais e ignorados pelo Git.
+
+Esse comando não altera o banco. Depois de um update bem-sucedido, execute
+novamente `npm run gtfs:check-compatibility` e só então faça a importação local.
+Não use `supabase db reset` para atualizar GTFS.
+
 O importador valida os cabeçalhos VBB, verifica checksums no staging, carrega
 as tabelas na ordem segura, materializa as geometrias/índices e calcula a
 fração de cada parada sobre o shape da viagem. O Studio local continua

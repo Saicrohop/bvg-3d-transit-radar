@@ -140,28 +140,52 @@ dinâmico, as contagens exatas variam entre execuções.
 
 ## Atualização do GTFS estático VBB
 
-O VBB publica o arquivo GTFS estático oficial em `https://unternehmen.vbb.de/gtfs`
-(atualizado duas vezes por semana). O script de atualização:
+A fonte oficial é a página [Offene Datensätze des VBB](https://unternehmen.vbb.de/digitale-services/datensaetze/),
+cujo download GTFS aponta para `https://unternehmen.vbb.de/gtfs`. O atualizador:
 
-1. Baixa o ZIP em streaming com `aiohttp`, calculando SHA-256 do arquivo;
+1. Baixa o ZIP para um arquivo temporário em streaming, calculando SHA-256 na
+   mesma passagem;
 2. Extrai em staging isolado com defesa contra *Zip Slip*;
 3. Valida os cinco arquivos obrigatórios (`routes.txt`, `trips.txt`, `stops.txt`,
-   `shapes.txt`, `stop_times.txt`) e seus cabeçalhos;
-4. Verifica se `calendar.txt` fornece intervalo de datas válido;
-5. Gera manifest JSON de proveniência (URL, timestamp, SHA-256 do arquivo,
-   SHA-256 por arquivo, intervalo do calendário);
-6. Troca o snapshot antigo de forma atômica (`staging.replace(output)`);
-7. Mantém o ZIP apenas com `--keep-archive`.
+   `shapes.txt`, `stop_times.txt`), seus cabeçalhos e o intervalo de
+   `calendar.txt`;
+4. Baixa um snapshot GTFS-RT e só aceita evidência que contenha timestamp,
+   tenha no máximo 900 segundos de idade (com tolerância de 120 segundos para
+   relógio adiantado), represente pelo menos 1.000 `trip_id` `SCHEDULED` únicos
+   e esteja coberta pelo calendário do candidato em `Europe/Berlin`;
+5. Exige ao menos 99% de correspondência dos `trip_id` únicos e nenhuma
+   divergência confirmada de `route_id` contra o `trips.txt` **em staging**;
+6. Gera o manifest JSON de proveniência com URL, timestamps UTC de download e
+   instalação, SHA-256 do ZIP recalculado no ponto de instalação, SHA-256 de
+   todos os arquivos regulares, intervalo do calendário e a evidência completa
+   que autorizou a promoção: instante da checagem, idade/data do feed, política
+   efetiva e todos os campos do relatório de compatibilidade;
+7. Renomeia o snapshot anterior para backup temporário, promove o staging e
+   substitui o manifest; qualquer falha de troca restaura o snapshot anterior;
+8. Remove arquivos temporários em sucesso ou erro. `--keep-archive` preserva o
+   ZIP validado em `data/gtfs-static/gtfs.zip`.
 
 ```bash
 npm run gtfs:update-static
 ```
 
-Saída JSON (com `--json`) inclui o manifest completo e `status: "installed"`.
-O comando falha com exit `2` se download, validação ou troca não puderem ser
-concluídos.
+A política pode ser ajustada explicitamente pelo CLI, por exemplo:
 
-Após a atualização, repita o gate de compatibilidade:
+```bash
+npm run gtfs:update-static -- \
+  --minimum-unique-scheduled-trips 1000 \
+  --max-feed-age-seconds 900 \
+  --max-future-skew-seconds 120
+```
+
+Reduzir esses limites enfraquece o gate e deve ficar restrito a diagnóstico
+controlado. A saída JSON informa `compatibility_policy`, o manifest e o
+relatório de compatibilidade, incluindo contagens brutas e de `trip_id` únicos.
+Os códigos de saída são `0` para instalação concluída, `1` para candidato válido
+porém incompatível e `2` para falha operacional ou entrada inválida. O comando
+não importa dados no PostGIS e não executa `supabase db reset`.
+
+Depois da instalação, repita o gate independente:
 
 ```bash
 npm run gtfs:check-compatibility

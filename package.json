@@ -10,7 +10,7 @@
     "antigravity": "agy",
     "codex": "codex",
     "gtfs:check-compatibility": "uv run python scripts/check_gtfs_compatibility.py --feed-url https://production.gtfsrt.vbb.de/data --trips-file data/gtfs-static/GTFS/trips.txt --minimum-scheduled-match 0.99 --json",
-    "gtfs:update-static": "uv run python scripts/update_vbb_gtfs_static.py --output-dir data/gtfs-static/GTFS --manifest data/gtfs-static/manifest.json --json",
+    "gtfs:update-static": "uv run python scripts/update_vbb_gtfs_static.py --url https://unternehmen.vbb.de/gtfs --feed-url https://production.gtfsrt.vbb.de/data --output data/gtfs-static/GTFS --manifest data/gtfs-static/manifest.json --minimum-scheduled-match 0.99 --minimum-unique-scheduled-trips 1000 --max-feed-age-seconds 900 --max-future-skew-seconds 120 --json",
     "gtfs:import-local": "bash scripts/import_static_gtfs_local.sh",
     "supabase": "supabase",
     "supabase:reset": "supabase db reset",

@@ -89,6 +89,75 @@ def test_report_separates_scheduled_canceled_and_exempt_trip_ids() -> None:
     assert report.unmatched_scheduled_trip_id_sample == ("trip-2",)
 
 
+def test_report_deduplicates_scheduled_trip_ids_for_match_ratio() -> None:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    relationship = gtfs_realtime_pb2.TripDescriptor.ScheduleRelationship
+    for entity_id in ("matched-1", "matched-2"):
+        _add_trip_update(
+            feed,
+            entity_id=entity_id,
+            trip_id="trip-matched",
+            route_id="route-1",
+            relationship=relationship.SCHEDULED,
+        )
+    _add_trip_update(
+        feed,
+        entity_id="unmatched",
+        trip_id="trip-unmatched",
+        route_id="route-2",
+        relationship=relationship.SCHEDULED,
+    )
+
+    report = analyze_gtfs_compatibility(
+        feed,
+        {"trip-matched": "route-1"},
+    )
+
+    assert report.scheduled_trip_updates == 3
+    assert report.unique_scheduled_trip_ids == 2
+    assert report.matched_scheduled_trip_ids == 1
+    assert report.unmatched_scheduled_trip_ids == 1
+    assert report.scheduled_match_ratio == 0.5
+    assert report.matched_route_ids == 1
+
+
+def test_report_treats_any_duplicate_route_mismatch_as_incompatible() -> None:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    relationship = gtfs_realtime_pb2.TripDescriptor.ScheduleRelationship
+    _add_trip_update(
+        feed,
+        entity_id="matching-route",
+        trip_id="trip-1",
+        route_id="route-static",
+        relationship=relationship.SCHEDULED,
+    )
+    _add_trip_update(
+        feed,
+        entity_id="mismatched-route",
+        trip_id="trip-1",
+        route_id="route-other",
+        relationship=relationship.SCHEDULED,
+    )
+
+    report = analyze_gtfs_compatibility(
+        feed,
+        {"trip-1": "route-static"},
+    )
+
+    assert report.unique_scheduled_trip_ids == 1
+    assert report.matched_route_ids == 0
+    assert report.mismatched_route_ids == 1
+    assert report.route_id_mismatch_sample == (
+        {
+            "trip_id": "trip-1",
+            "realtime_route_id": "route-other",
+            "static_route_id": "route-static",
+        },
+    )
+
+
 def test_report_confirms_route_ids_for_static_matched_trips() -> None:
     feed = gtfs_realtime_pb2.FeedMessage()
     feed.header.gtfs_realtime_version = "2.0"
@@ -143,12 +212,37 @@ def test_report_fails_closed_when_feed_has_no_scheduled_trips() -> None:
     assert report.scheduled_match_ratio == 0.0
 
 
+def test_report_exempts_all_non_scheduled_relationships() -> None:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    relationship = gtfs_realtime_pb2.TripDescriptor.ScheduleRelationship
+    for entity_id, value in (
+        ("added", relationship.ADDED),
+        ("duplicated", relationship.DUPLICATED),
+        ("unscheduled", relationship.UNSCHEDULED),
+    ):
+        _add_trip_update(
+            feed,
+            entity_id=entity_id,
+            trip_id=f"trip-{entity_id}",
+            route_id=f"route-{entity_id}",
+            relationship=value,
+        )
+
+    report = analyze_gtfs_compatibility(feed, {})
+
+    assert report.total_trip_updates == 3
+    assert report.exempt_non_scheduled_trip_ids == 3
+    assert report.scheduled_trip_updates == 0
+
+
 def _compatibility_report(match_ratio: float) -> GtfsCompatibilityReport:
     return GtfsCompatibilityReport(
         feed_timestamp=1_788_380_145,
         schedule_hash="schedule-abc",
         total_trip_updates=4,
         scheduled_trip_updates=2,
+        unique_scheduled_trip_ids=2,
         matched_scheduled_trip_ids=1,
         unmatched_scheduled_trip_ids=1,
         scheduled_match_ratio=match_ratio,
@@ -292,6 +386,44 @@ def test_cli_reports_invalid_protobuf_as_operational_error() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("option", "value", "message"),
+    [
+        ("--sample-limit", "-1", "must be non-negative"),
+        (
+            "--minimum-scheduled-match",
+            "-0.1",
+            "must be between 0.0 and 1.0",
+        ),
+        (
+            "--minimum-scheduled-match",
+            "nan",
+            "must be between 0.0 and 1.0",
+        ),
+    ],
+)
+def test_cli_rejects_invalid_numeric_options(
+    option: str,
+    value: str,
+    message: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as captured:
+        cli_main(
+            [
+                "--feed-url",
+                "https://example.test/feed",
+                "--trips-file",
+                "static/trips.txt",
+                option,
+                value,
+            ]
+        )
+
+    assert captured.value.code == 2
+    assert message in capsys.readouterr().err
+
+
 def test_load_static_trip_routes_reads_trip_and_route_ids(tmp_path: Path) -> None:
     trips_file = tmp_path / "trips.txt"
     trips_file.write_text(
@@ -315,6 +447,47 @@ def test_load_static_trip_routes_requires_trip_and_route_columns(
     with pytest.raises(
         gtfs_compatibility.GtfsCompatibilityError,
         match="trips.txt must contain columns: route_id, trip_id",
+    ):
+        gtfs_compatibility.load_static_trip_routes(trips_file)
+
+
+def test_load_static_trip_routes_rejects_conflicting_duplicate_trip_ids(
+    tmp_path: Path,
+) -> None:
+    trips_file = tmp_path / "trips.txt"
+    trips_file.write_text(
+        "route_id,trip_id\nroute-1,trip-1\nroute-2,trip-1\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        gtfs_compatibility.GtfsCompatibilityError,
+        match="conflicting routes for trip_id trip-1",
+    ):
+        gtfs_compatibility.load_static_trip_routes(trips_file)
+
+
+def test_load_static_trip_routes_rejects_blank_trip_id(tmp_path: Path) -> None:
+    trips_file = tmp_path / "trips.txt"
+    trips_file.write_text(
+        "route_id,trip_id\nroute-1,\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        gtfs_compatibility.GtfsCompatibilityError,
+        match="blank trip_id at row 2",
+    ):
+        gtfs_compatibility.load_static_trip_routes(trips_file)
+
+
+def test_load_static_trip_routes_rejects_invalid_utf8(tmp_path: Path) -> None:
+    trips_file = tmp_path / "trips.txt"
+    trips_file.write_bytes(b"route_id,trip_id\nroute-1,\xff\n")
+
+    with pytest.raises(
+        gtfs_compatibility.GtfsCompatibilityError,
+        match="Cannot parse static GTFS trips.txt",
     ):
         gtfs_compatibility.load_static_trip_routes(trips_file)
 
@@ -348,6 +521,16 @@ def test_schedule_hash_from_content_type_extracts_vbb_parameter() -> None:
     assert schedule_hash == "abc123"
 
 
+class _FakeResponseContent:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+
+    async def iter_chunked(self, chunk_size: int):
+        assert chunk_size == 1024 * 1024
+        for chunk in self._chunks:
+            yield chunk
+
+
 class _FakeResponse:
     def __init__(
         self,
@@ -355,10 +538,14 @@ class _FakeResponse:
         content_type: str,
         *,
         status: int = 200,
+        chunks: list[bytes] | None = None,
     ) -> None:
         self.status = status
         self.headers = {"Content-Type": content_type}
         self._payload = payload
+        self.content = _FakeResponseContent(
+            [payload] if chunks is None else chunks
+        )
 
     async def __aenter__(self) -> "_FakeResponse":
         return self
@@ -458,6 +645,28 @@ def test_fetch_gtfs_realtime_payload_rejects_empty_body() -> None:
             gtfs_compatibility.fetch_gtfs_realtime_payload(
                 session,
                 "https://example.test/feed",
+            )
+        )
+
+
+def test_fetch_gtfs_realtime_payload_rejects_body_over_limit() -> None:
+    session = _FakeSession(
+        _FakeResponse(
+            b"123456",
+            "application/protobuf",
+            chunks=[b"1234", b"56"],
+        )
+    )
+
+    with pytest.raises(
+        gtfs_compatibility.GtfsCompatibilityError,
+        match="exceeds 5 bytes",
+    ):
+        asyncio.run(
+            gtfs_compatibility.fetch_gtfs_realtime_payload(
+                session,
+                "https://example.test/feed",
+                max_bytes=5,
             )
         )
 

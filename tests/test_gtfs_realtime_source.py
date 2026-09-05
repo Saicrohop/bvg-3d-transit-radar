@@ -4,6 +4,11 @@ from datetime import date
 import pytest
 from google.transit import gtfs_realtime_pb2
 
+from bvg_radar.realtime.models import (
+    GtfsRealtimeFetchResult,
+    GtfsRealtimeFetchStatus,
+    GtfsRealtimeSnapshot,
+)
 from bvg_radar.realtime.source import AiohttpGtfsRealtimeSource
 
 
@@ -53,7 +58,100 @@ def protobuf_trip_update() -> bytes:
     return feed.SerializeToString()
 
 
-def test_source_reuses_etag_without_forcing_an_incompatible_accept_header() -> None:
+def protobuf_empty_feed() -> bytes:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.header.gtfs_realtime_version = "2.0"
+    feed.header.timestamp = 1_784_457_600
+    return feed.SerializeToString()
+
+
+def protobuf_uninitialized_feed() -> bytes:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    feed.entity.add().id = "entity-without-required-header"
+    return feed.SerializePartialToString()
+
+
+@pytest.mark.parametrize(
+    ("status", "snapshot"),
+    [
+        (GtfsRealtimeFetchStatus.UPDATED, None),
+        (
+            GtfsRealtimeFetchStatus.NOT_MODIFIED,
+            GtfsRealtimeSnapshot(feed_timestamp=None, trip_updates=()),
+        ),
+    ],
+)
+def test_fetch_result_rejects_contradictory_status_and_snapshot(
+    status: GtfsRealtimeFetchStatus,
+    snapshot: GtfsRealtimeSnapshot | None,
+) -> None:
+    with pytest.raises(ValueError, match="snapshot"):
+        GtfsRealtimeFetchResult(status=status, snapshot=snapshot)
+
+
+def test_source_distinguishes_valid_empty_snapshot_from_not_modified() -> None:
+    source = AiohttpGtfsRealtimeSource(
+        session=FakeSession(
+            [
+                FakeResponse(200, protobuf_empty_feed(), etag='"empty"'),
+                FakeResponse(304),
+            ]
+        ),
+        url="https://production.gtfsrt.vbb.de/data",
+    )
+
+    updated = asyncio.run(source.fetch())
+    not_modified = asyncio.run(source.fetch())
+
+    assert updated.status is GtfsRealtimeFetchStatus.UPDATED
+    assert updated.snapshot is not None
+    assert updated.snapshot.feed_timestamp == 1_784_457_600
+    assert updated.snapshot.trip_updates == ()
+    assert not_modified.status is GtfsRealtimeFetchStatus.NOT_MODIFIED
+    assert not_modified.snapshot is None
+
+
+def test_source_does_not_reuse_etag_from_an_invalid_protobuf_payload() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(200, b"\xff", etag='"invalid"'),
+            FakeResponse(200, protobuf_trip_update(), etag='"valid"'),
+        ]
+    )
+    source = AiohttpGtfsRealtimeSource(
+        session=session,
+        url="https://production.gtfsrt.vbb.de/data",
+    )
+
+    with pytest.raises(RuntimeError, match="valid Protobuf"):
+        asyncio.run(source.fetch())
+    recovered = asyncio.run(source.fetch())
+
+    assert recovered.status is GtfsRealtimeFetchStatus.UPDATED
+    assert session.calls[1][1] == {"User-Agent": "bvg-3d-radar/1.0"}
+
+
+def test_source_rejects_uninitialized_protobuf_without_advancing_etag() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(200, protobuf_uninitialized_feed(), etag='"incomplete"'),
+            FakeResponse(200, protobuf_trip_update(), etag='"valid"'),
+        ]
+    )
+    source = AiohttpGtfsRealtimeSource(
+        session=session,
+        url="https://production.gtfsrt.vbb.de/data",
+    )
+
+    with pytest.raises(RuntimeError, match="valid Protobuf"):
+        asyncio.run(source.fetch())
+    recovered = asyncio.run(source.fetch())
+
+    assert recovered.status is GtfsRealtimeFetchStatus.UPDATED
+    assert session.calls[1][1] == {"User-Agent": "bvg-3d-radar/1.0"}
+
+
+def test_source_sends_user_agent_and_reuses_etag_without_forcing_accept() -> None:
     session = FakeSession(
         [
             FakeResponse(200, protobuf_trip_update(), etag='"first"'),
@@ -65,16 +163,47 @@ def test_source_reuses_etag_without_forcing_an_incompatible_accept_header() -> N
         url="https://production.gtfsrt.vbb.de/data",
     )
 
-    first = asyncio.run(source.fetch_trip_updates())
-    second = asyncio.run(source.fetch_trip_updates())
+    first = asyncio.run(source.fetch())
+    second = asyncio.run(source.fetch())
 
-    assert first[0].trip_id == "trip-42"
-    assert first[0].service_date == date(2026, 7, 19)
-    assert second == ()
+    assert first.snapshot is not None
+    assert first.snapshot.trip_updates[0].trip_id == "trip-42"
+    assert first.snapshot.trip_updates[0].service_date == date(2026, 7, 19)
+    assert second.status is GtfsRealtimeFetchStatus.NOT_MODIFIED
     assert session.calls == [
-        ("https://production.gtfsrt.vbb.de/data", {}),
-        ("https://production.gtfsrt.vbb.de/data", {"If-None-Match": '"first"'}),
+        (
+            "https://production.gtfsrt.vbb.de/data",
+            {"User-Agent": "bvg-3d-radar/1.0"},
+        ),
+        (
+            "https://production.gtfsrt.vbb.de/data",
+            {
+                "User-Agent": "bvg-3d-radar/1.0",
+                "If-None-Match": '"first"',
+            },
+        ),
     ]
+
+
+def test_source_clears_a_stale_etag_after_valid_response_without_etag() -> None:
+    session = FakeSession(
+        [
+            FakeResponse(200, protobuf_trip_update(), etag='"first"'),
+            FakeResponse(200, protobuf_trip_update()),
+            FakeResponse(200, protobuf_trip_update(), etag='"third"'),
+        ]
+    )
+    source = AiohttpGtfsRealtimeSource(
+        session=session,
+        url="https://production.gtfsrt.vbb.de/data",
+    )
+
+    asyncio.run(source.fetch())
+    asyncio.run(source.fetch())
+    asyncio.run(source.fetch())
+
+    assert session.calls[1][1]["If-None-Match"] == '"first"'
+    assert session.calls[2][1] == {"User-Agent": "bvg-3d-radar/1.0"}
 
 
 def test_source_rejects_html_despite_a_successful_http_status() -> None:
@@ -92,7 +221,7 @@ def test_source_rejects_html_despite_a_successful_http_status() -> None:
     )
 
     with pytest.raises(RuntimeError, match="Content-Type"):
-        asyncio.run(source.fetch_trip_updates())
+        asyncio.run(source.fetch())
 
 
 def test_source_rejects_an_empty_protobuf_response() -> None:
@@ -102,4 +231,4 @@ def test_source_rejects_an_empty_protobuf_response() -> None:
     )
 
     with pytest.raises(RuntimeError, match="empty"):
-        asyncio.run(source.fetch_trip_updates())
+        asyncio.run(source.fetch())

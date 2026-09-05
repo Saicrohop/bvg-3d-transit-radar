@@ -31,3 +31,6 @@ dev = [
 addopts = "-q"
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "integration: opt-in tests against the local Supabase/PostGIS instance",
+]

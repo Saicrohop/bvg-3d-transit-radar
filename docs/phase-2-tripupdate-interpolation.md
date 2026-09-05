@@ -39,11 +39,60 @@ O endpoint de produção validado para o backend é:
 https://production.gtfsrt.vbb.de/data
 ```
 
+O cliente identifica a aplicação com `User-Agent: bvg-3d-radar/1.0`. A
+validação real mostrou que uma requisição sem essa identificação recebe HTTP
+403, enquanto a mesma fonte responde normalmente com o cabeçalho explícito.
+
 Ele retorna Protobuf GTFS-Realtime. A amostra validada continha `TripUpdate`s,
 não `VehiclePosition`s. Portanto latitude, longitude, bearing e velocidade
 produzidos nesta fase são **estimativas**, não telemetria GPS observada.
 
 Não use `https://staging.gtfsrt.vbb.de/data` como fonte operacional.
+
+---
+
+## Preservação semântica GTFS-Realtime
+
+A normalização mantém separados os tempos de procedência:
+
+- `FeedHeader.timestamp` identifica o snapshot e é armazenado como
+  `GtfsRealtimeSnapshot.feed_timestamp`;
+- `TripUpdate.timestamp` pertence à previsão da entidade e é armazenado como
+  `TripUpdate.trip_update_timestamp`.
+
+Os relacionamentos de viagem são preservados como enums de domínio:
+`SCHEDULED`, `ADDED`, `UNSCHEDULED`, `CANCELED`, `REPLACEMENT`, `DUPLICATED`,
+`DELETED`, `NEW` e `UNKNOWN`. O binding Protobuf instalado não declara todos os
+valores atuais; por isso, valores enum retidos no conjunto de campos
+`unknown` do proto2 são inspecionados antes de aceitar o default
+`SCHEDULED`. Os valores atuais `DELETED=7` e `NEW=8` são reconhecidos; qualquer
+valor futuro não compreendido torna-se `UNKNOWN`.
+
+Somente uma viagem `SCHEDULED` com `trip_id`, `route_id` e data de serviço
+válidos pode chegar ao interpolador baseado no GTFS estático. Os demais estados
+continuam disponíveis no snapshot para ciclo de vida e auditoria, mas não geram
+uma posição artificial sobre uma viagem programada.
+
+Nos `StopTimeUpdate`s, `SCHEDULED`, `SKIPPED`, `NO_DATA`, `UNSCHEDULED` e
+`UNKNOWN` também são preservados. Paradas `SKIPPED` e `NO_DATA` mantêm os dados
+recebidos no DTO, porém seus horários e atrasos são removidos do payload enviado
+ao estimador.
+
+Uma `FeedEntity` com `is_deleted=true` prevalece sobre qualquer
+`trip_update` incorporado. Seu `entity_id` é registrado como tombstone e chega
+ao resultado do ciclo; a aplicação desses tombstones ao snapshot WebSocket
+pertence à etapa posterior de ciclo de vida da entrega.
+
+O cliente HTTP distingue os estados condicionais:
+
+- HTTP `200` com Protobuf válido, mesmo sem entidades, produz `UPDATED` com um
+  snapshot;
+- HTTP `304` produz `NOT_MODIFIED` sem snapshot.
+
+Em respostas `200`, o corpo precisa conter uma `FeedMessage` Protobuf
+inicializada, inclusive os campos obrigatórios do header. O ETag só é promovido
+após parse e normalização bem-sucedidos; uma resposta válida sem ETag limpa o
+validador anterior.
 
 ---
 
@@ -55,8 +104,9 @@ Não use `https://staging.gtfsrt.vbb.de/data` como fonte operacional.
 | `supabase/migrations/20260719113000_clamp_stop_shape_fraction.sql` | Corrige precisão IEEE-754 de `ST_LineLocatePoint` nos endpoints de linha. |
 | `supabase/sql/phase_2_import_vbb_static_local.sql` | Recarrega o GTFS estático, incluindo `stop_times.txt`, apenas localmente. |
 | `supabase/sql/phase_2_after_stop_times_import.sql` | Pré-calcula `shape_fraction`, cria índice e executa `ANALYZE`. |
-| `src/bvg_radar/realtime/source.py` | Busca assíncrona Protobuf com `aiohttp` e reutilização de ETag. |
-| `src/bvg_radar/realtime/normalization.py` | Converte Protobuf em DTOs sem vazar tipos do transporte. |
+| `src/bvg_radar/realtime/models.py` | Define snapshots, resultados de fetch, timestamps separados, relacionamentos tipados e tombstones. |
+| `src/bvg_radar/realtime/source.py` | Busca assíncrona Protobuf com `aiohttp`, validação estrutural e ETag transacional. |
+| `src/bvg_radar/realtime/normalization.py` | Converte Protobuf em DTOs sem vazar tipos do transporte nem perder estados proto2. |
 | `src/bvg_radar/realtime/postgis.py` | Adaptador para a função PostGIS privada. |
 | `src/bvg_radar/realtime/worker.py` | Worker assíncrono e porta de publicação para a futura camada WebSocket. |
 | `src/bvg_radar/realtime/runner.py` | Composition root de ciclo único; conecta `aiohttp`, `asyncpg`, worker e saída JSON Lines no console. |
@@ -128,11 +178,24 @@ Para validar código e SQL sem precisar de Docker:
 npm test
 ```
 
-Com Supabase local ativo e o GTFS importado, execute a integração PostGIS:
+Com Supabase local ativo e o GTFS importado, execute a integração SQL/PostGIS:
 
 ```bash
 npm run test:phase2:local
 ```
+
+A integração Python → PostGIS é opt-in e usa o adapter real em uma transação
+somente leitura. Ela seleciona dinamicamente um segmento seguro do snapshot
+instalado, sem fixar `trip_id`, e recusa URLs que não apontem para loopback na
+porta local `54022`:
+
+```bash
+export BVG_DATABASE_URL='postgresql://[ROLE]:***@127.0.0.1:54022/postgres'
+npm run test:integration:local
+```
+
+Sem `BVG_DATABASE_URL`, o teste registra `SKIPPED` com motivo explícito; ele não
+é apresentado como integração executada.
 
 ### Dry-run server-side real
 
@@ -173,16 +236,19 @@ Após a importação e o pós-processamento local, foram verificados:
 
 | Verificação | Resultado |
 |---|---:|
-| `gtfs.stop_times` carregados | 5.799.125 |
+| `gtfs.stop_times` carregados | 5.719.111 |
 | `shape_fraction` nulo | 0 |
 | Frações fora de `[0, 1]` | 0 |
-| Segmentos não monotônicos suprimidos | 13.229 |
-| TripUpdates recebidos no dry-run ao vivo | 7.052 |
+| Segmentos não monotônicos suprimidos | 10.877 |
+| TripUpdates recebidos no dry-run ao vivo | 5.828 |
 | Posições estimadas impressas no dry-run | 2 |
-| Testes Python | 9 aprovados |
+| Integração opt-in Python → PostGIS | 1 aprovada |
+| Testes Python padrão | 140 aprovados, 1 integração ignorada sem opt-in |
+| Testes frontend | 23 aprovados |
 
-A regressão de precisão de endpoint também foi reproduzida e tratada: o valor
-bruto `1.0000000000000002` é persistido como `1.0`.
+A regressão de precisão de endpoint também é verificada de forma determinística:
+os limites `1.0000000000000002` e `-0.0000000000000002` são normalizados para
+`1.0` e `0.0`, respectivamente.
 
 ---
 

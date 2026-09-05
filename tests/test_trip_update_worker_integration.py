@@ -5,7 +5,12 @@ import pytest
 
 from bvg_radar.realtime.contracts import EstimatedVehiclePosition
 from bvg_radar.realtime.gtfs_route_metadata import GtfsRouteMetadataLookup
-from bvg_radar.realtime.models import TripUpdate
+from bvg_radar.realtime.models import (
+    GtfsRealtimeFetchResult,
+    GtfsRealtimeFetchStatus,
+    GtfsRealtimeSnapshot,
+    TripUpdate,
+)
 from bvg_radar.realtime.worker import (
     AsyncQueuePositionEventPublisher,
     TripUpdateIngestionWorker,
@@ -17,9 +22,15 @@ class MockGtfsRealtimeDownload:
         self._update = update
         self.calls = 0
 
-    async def fetch_trip_updates(self) -> tuple[TripUpdate, ...]:
+    async def fetch(self) -> GtfsRealtimeFetchResult:
         self.calls += 1
-        return (self._update,)
+        return GtfsRealtimeFetchResult(
+            status=GtfsRealtimeFetchStatus.UPDATED,
+            snapshot=GtfsRealtimeSnapshot(
+                feed_timestamp=1_784_543_900,
+                trip_updates=(self._update,),
+            ),
+        )
 
 
 class MockPostgisEstimator:
@@ -65,7 +76,7 @@ def test_worker_enriches_s41_and_publishes_its_category_in_websocket_json(
         trip_id="trip-s41",
         route_id="route-s41",
         service_date=date(2026, 7, 20),
-        feed_timestamp=1_784_544_000,
+        trip_update_timestamp=1_784_544_000,
         stop_time_updates=(),
     )
     source = MockGtfsRealtimeDownload(update)

@@ -24,67 +24,68 @@ BEGIN
 END;
 $$;
 
--- A real VBB fixture that previously produced 1.0000000000000002. The clamp
--- must preserve its physical endpoint as exactly 1.0 before persistence.
+-- The clamp must absorb the one-ULP overflow/underflow values that PostGIS can
+-- produce at line endpoints. Keep this deterministic instead of depending on
+-- a trip_id that disappears whenever VBB publishes a new static schedule.
 DO $$
 DECLARE
-    raw_fraction DOUBLE PRECISION;
-    clamped_fraction DOUBLE PRECISION;
+    upper_clamped DOUBLE PRECISION;
+    lower_clamped DOUBLE PRECISION;
 BEGIN
-    SELECT extensions.st_linelocatepoint(shape.geom_4326, stop.geom)
-    INTO raw_fraction
-    FROM gtfs.stop_times AS stop_time
-    JOIN gtfs.trips AS trip ON trip.trip_id = stop_time.trip_id
-    JOIN gtfs.stops AS stop ON stop.stop_id = stop_time.stop_id
-    JOIN gtfs.route_shapes_geom AS shape ON shape.shape_id = trip.shape_id
-    WHERE stop_time.trip_id = '288596537'
-      AND stop_time.stop_id = 'de:12051:900275719::2'
-      AND stop_time.stop_sequence = 32;
+    SELECT
+        gtfs.clamp_shape_fraction(1.0000000000000002::DOUBLE PRECISION),
+        gtfs.clamp_shape_fraction((-0.0000000000000002)::DOUBLE PRECISION)
+    INTO upper_clamped, lower_clamped;
 
-    IF raw_fraction IS NULL OR raw_fraction <= 1.0::DOUBLE PRECISION THEN
-        RAISE EXCEPTION 'Regression fixture no longer reproduces an upper-bound projection: %', raw_fraction;
-    END IF;
-
-    SELECT gtfs.clamp_shape_fraction(raw_fraction) INTO clamped_fraction;
-
-    IF clamped_fraction <> 1.0::DOUBLE PRECISION THEN
-        RAISE EXCEPTION 'Expected a bounded shape fraction of 1.0, got %', clamped_fraction;
+    IF upper_clamped <> 1.0::DOUBLE PRECISION
+       OR lower_clamped <> 0.0::DOUBLE PRECISION THEN
+        RAISE EXCEPTION
+            'Expected endpoint clamps [1, 0], got [%, %]',
+            upper_clamped,
+            lower_clamped;
     END IF;
 END;
 $$;
 
--- Exercise delay-aware interpolation with static VBB data. The 120-second
--- simulated TripUpdate delay must appear in the estimated next-arrival result.
+-- Exercise delay-aware interpolation with a safe segment selected from the
+-- currently installed VBB snapshot. The 120-second simulated TripUpdate delay
+-- must appear in the estimated next-arrival result.
 DO $$
 DECLARE
     estimate_record RECORD;
 BEGIN
-    WITH scheduled AS (
+    WITH candidate AS (
         SELECT
             stop_time.trip_id,
             stop_time.stop_sequence,
             stop_time.shape_fraction,
+            next_stop.stop_sequence AS next_stop_sequence,
+            next_stop.shape_fraction AS next_shape_fraction,
             (
-                DATE '2026-07-19'
+                CURRENT_DATE
                 + gtfs.gtfs_time_to_interval(stop_time.departure_time)
             ) AT TIME ZONE 'Europe/Berlin' AS departure_at,
-            LEAD(stop_time.stop_sequence) OVER stop_order AS next_stop_sequence,
-            LEAD(stop_time.shape_fraction) OVER stop_order AS next_shape_fraction,
-            LEAD(
-                (
-                    DATE '2026-07-19'
-                    + gtfs.gtfs_time_to_interval(stop_time.arrival_time)
-                ) AT TIME ZONE 'Europe/Berlin'
-            ) OVER stop_order AS next_arrival_at
+            (
+                CURRENT_DATE
+                + gtfs.gtfs_time_to_interval(next_stop.arrival_time)
+            ) AT TIME ZONE 'Europe/Berlin' AS next_arrival_at
         FROM gtfs.stop_times AS stop_time
-        WHERE stop_time.trip_id = '288596537'
-        WINDOW stop_order AS (ORDER BY stop_time.stop_sequence)
-    ),
-    candidate AS (
-        SELECT *
-        FROM scheduled
-        WHERE next_shape_fraction > shape_fraction
-          AND next_arrival_at - departure_at >= INTERVAL '2 minutes'
+        JOIN LATERAL (
+            SELECT
+                following.stop_sequence,
+                following.shape_fraction,
+                following.arrival_time
+            FROM gtfs.stop_times AS following
+            WHERE following.trip_id = stop_time.trip_id
+              AND following.stop_sequence > stop_time.stop_sequence
+            ORDER BY following.stop_sequence
+            LIMIT 1
+        ) AS next_stop ON TRUE
+        WHERE next_stop.shape_fraction > stop_time.shape_fraction
+          AND gtfs.gtfs_time_to_interval(next_stop.arrival_time)
+              - gtfs.gtfs_time_to_interval(stop_time.departure_time)
+              >= INTERVAL '2 minutes'
+        ORDER BY stop_time.trip_id, stop_time.stop_sequence
         LIMIT 1
     )
     SELECT estimate.*
@@ -92,7 +93,7 @@ BEGIN
     FROM candidate
     CROSS JOIN LATERAL gtfs.estimate_trip_position(
         candidate.trip_id,
-        DATE '2026-07-19',
+        CURRENT_DATE,
         candidate.departure_at + (candidate.next_arrival_at - candidate.departure_at) / 2,
         jsonb_build_array(
             jsonb_build_object(
@@ -103,7 +104,7 @@ BEGIN
     ) AS estimate;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Expected a safe interpolable segment for the VBB fixture';
+        RAISE EXCEPTION 'Expected a safe interpolable segment in the current VBB snapshot';
     END IF;
 
     IF estimate_record.delay_seconds <> 120

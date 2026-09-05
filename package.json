@@ -23,6 +23,7 @@
     "test:python": "uv run pytest",
     "test": "npm run test:phase1 && npm run test:phase2:sql && npm run test:python",
     "test:frontend": "npm --prefix frontend run test",
+    "test:integration:local": "uv run pytest tests/integration -m integration -v -rs",
     "lint:frontend": "npm --prefix frontend run lint",
     "build:frontend": "npm --prefix frontend run build",
     "verify": "npm run test && npm run test:frontend && npm run lint:frontend && npm run build:frontend",

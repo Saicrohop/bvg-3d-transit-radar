@@ -5,12 +5,16 @@ from datetime import datetime
 from typing import Protocol
 
 from .contracts import EstimatedVehiclePosition
-from .models import TripUpdate
+from .models import (
+    GtfsRealtimeFetchResult,
+    GtfsRealtimeFetchStatus,
+    TripUpdate,
+)
 from .vehicle_category import classify_berlin_vehicle
 
 
 class TripUpdateSource(Protocol):
-    async def fetch_trip_updates(self) -> tuple[TripUpdate, ...]: ...
+    async def fetch(self) -> GtfsRealtimeFetchResult: ...
 
 
 class TripPositionEstimator(Protocol):
@@ -39,6 +43,9 @@ ErrorReporter = Callable[[Exception], Awaitable[None]]
 class IngestionRunResult:
     trip_updates_received: int
     estimated_positions_published: int
+    fetch_status: GtfsRealtimeFetchStatus
+    feed_timestamp: int | None
+    deleted_entity_ids: tuple[str, ...]
 
 
 class AsyncQueuePositionEventPublisher:
@@ -74,9 +81,13 @@ class TripUpdateIngestionWorker:
         if max_positions is not None and max_positions <= 0:
             raise ValueError("max_positions must be positive when provided")
 
-        updates = await self._source.fetch_trip_updates()
+        fetch_result = await self._source.fetch()
+        snapshot = fetch_result.snapshot
+        updates = () if snapshot is None else snapshot.trip_updates
         events_to_publish: list[dict[str, object]] = []
         for update in updates:
+            if not update.is_static_schedule_matchable:
+                continue
             estimate = await self._estimator.estimate(update, observed_at)
             if estimate is None:
                 continue
@@ -112,6 +123,11 @@ class TripUpdateIngestionWorker:
         return IngestionRunResult(
             trip_updates_received=len(updates),
             estimated_positions_published=len(events_to_publish),
+            fetch_status=fetch_result.status,
+            feed_timestamp=None if snapshot is None else snapshot.feed_timestamp,
+            deleted_entity_ids=()
+            if snapshot is None
+            else tuple(entity.entity_id for entity in snapshot.deleted_entities),
         )
 
     async def run_forever(

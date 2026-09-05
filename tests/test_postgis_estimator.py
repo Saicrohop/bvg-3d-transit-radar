@@ -36,7 +36,7 @@ def test_postgis_estimator_passes_normalized_realtime_values_as_json() -> None:
         trip_id="trip-42",
         route_id="route-7",
         service_date=date(2026, 7, 19),
-        feed_timestamp=1_784_457_600,
+        trip_update_timestamp=1_784_457_600,
         stop_time_updates=(
             StopTimeUpdate(
                 stop_sequence=2,

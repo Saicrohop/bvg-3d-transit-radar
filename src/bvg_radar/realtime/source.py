@@ -2,8 +2,8 @@ from typing import Protocol
 
 from google.transit import gtfs_realtime_pb2
 
-from .models import TripUpdate
-from .normalization import trip_updates_from_feed
+from .models import GtfsRealtimeFetchResult, GtfsRealtimeFetchStatus
+from .normalization import snapshot_from_feed
 
 SUPPORTED_PROTOBUF_MEDIA_TYPES = frozenset(
     {
@@ -42,11 +42,16 @@ class AiohttpGtfsRealtimeSource:
         self._url = url
         self._etag: str | None = None
 
-    async def fetch_trip_updates(self) -> tuple[TripUpdate, ...]:
-        headers = {} if self._etag is None else {"If-None-Match": self._etag}
+    async def fetch(self) -> GtfsRealtimeFetchResult:
+        headers = {"User-Agent": "bvg-3d-radar/1.0"}
+        if self._etag is not None:
+            headers["If-None-Match"] = self._etag
         async with self._session.get(self._url, headers=headers) as response:
             if response.status == 304:
-                return ()
+                return GtfsRealtimeFetchResult(
+                    status=GtfsRealtimeFetchStatus.NOT_MODIFIED,
+                    snapshot=None,
+                )
             if response.status != 200:
                 raise GtfsRealtimeFetchError(
                     f"GTFS-RT request failed with HTTP {response.status}"
@@ -59,11 +64,18 @@ class AiohttpGtfsRealtimeSource:
             payload = await response.read()
             if not payload:
                 raise GtfsRealtimeFetchError("GTFS-RT payload is empty")
-            self._etag = response.headers.get("ETag", self._etag)
+            response_etag = response.headers.get("ETag")
 
         feed = gtfs_realtime_pb2.FeedMessage()
         try:
             feed.ParseFromString(payload)
+            if not feed.IsInitialized():
+                raise ValueError("required GTFS-RT Protobuf fields are missing")
+            snapshot = snapshot_from_feed(feed)
         except Exception as error:
             raise GtfsRealtimeFetchError("GTFS-RT payload is not valid Protobuf") from error
-        return trip_updates_from_feed(feed)
+        self._etag = response_etag
+        return GtfsRealtimeFetchResult(
+            status=GtfsRealtimeFetchStatus.UPDATED,
+            snapshot=snapshot,
+        )

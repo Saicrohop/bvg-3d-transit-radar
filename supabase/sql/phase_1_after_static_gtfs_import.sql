@@ -8,6 +8,8 @@
 -- The first refresh cannot be CONCURRENTLY because the materialized view was
 -- created WITH NO DATA. It is safe during the one-time initial static import.
 REFRESH MATERIALIZED VIEW gtfs.route_shapes_geom;
+-- Rebuild the stop/station mode lookup after every atomic GTFS replacement.
+REFRESH MATERIALIZED VIEW gtfs.stop_vehicle_modes;
 
 -- Build non-primary indexes after the bulk load, which is substantially faster
 -- than maintaining them for every imported GTFS row.
@@ -37,6 +39,7 @@ ANALYZE gtfs.trips;
 ANALYZE gtfs.stops;
 ANALYZE gtfs.shapes;
 ANALYZE gtfs.route_shapes_geom;
+ANALYZE gtfs.stop_vehicle_modes;
 
 -- Phase-1 validation: all values should be sensible before proceeding.
 SELECT

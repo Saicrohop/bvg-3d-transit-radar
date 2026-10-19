@@ -1,14 +1,16 @@
 import { TextLayer } from '@deck.gl/layers'
-import { ScenegraphLayer } from '@deck.gl/mesh-layers'
+import { VertexColorScenegraphLayer as ScenegraphLayer } from './vertexColorScenegraphLayer'
 
 import type {
   EstimatedVehiclePosition,
   VehicleCategory,
 } from '../realtime/vehiclePositions'
+import { getBerlinTransitLineColorRgb } from '../ui/berlinTransitColors'
 import {
   getScenegraphOrientation,
   getScenegraphPosition,
   getScenegraphTranslation,
+  MODEL_HEIGHTS_METERS,
   MODEL_SIZE_SCALES,
   MODEL_URLS,
   type CalibrationVehicleType,
@@ -28,20 +30,13 @@ export type ScenegraphAssetErrorHandler = (
 export type ProductionScenegraphLayerOptions = Readonly<{
   failedVehicleTypes?: ReadonlySet<CalibrationVehicleType>
   onScenegraphAssetError?: ScenegraphAssetErrorHandler
+  labelVehicles?: readonly EstimatedVehiclePosition[]
 }>
 
 const EMPTY_FAILED_VEHICLE_TYPES: ReadonlySet<CalibrationVehicleType> = new Set()
 const VEHICLE_POSITION_TRANSITION = { getPosition: 1000 } as const
-const LABEL_COLOR = [255, 255, 255] as const
 const LABEL_OUTLINE_COLOR = [0, 0, 0, 255] as const
-const LABEL_ELEVATION_BY_VEHICLE_TYPE: Readonly<
-  Record<CalibrationVehicleType, number>
-> = {
-  bus: 15,
-  regional: 6,
-  train: 2,
-  tram: 5,
-}
+const LABEL_CLEARANCE_METERS = 2
 
 const MODEL_TYPE_BY_CATEGORY: Readonly<
   Record<VehicleCategory, CalibrationVehicleType>
@@ -50,7 +45,7 @@ const MODEL_TYPE_BY_CATEGORY: Readonly<
   regional: 'regional',
   s_bahn: 'train',
   tram: 'tram',
-  u_bahn: 'bus',
+  u_bahn: 'u_bahn',
 }
 
 export function createProductionScenegraphLayers(
@@ -58,11 +53,15 @@ export function createProductionScenegraphLayers(
   {
     failedVehicleTypes = EMPTY_FAILED_VEHICLE_TYPES,
     onScenegraphAssetError,
+    labelVehicles: labelSource = vehicles,
   }: ProductionScenegraphLayerOptions = {},
 ) {
   const scenegraphVehicles = vehicles.flatMap(toProductionScenegraphVehicle)
-  const genericVehicles = scenegraphVehicles.filter(
+  const busVehicles = scenegraphVehicles.filter(
     (vehicle) => vehicle.vehicleType === 'bus',
+  )
+  const uBahnVehicles = scenegraphVehicles.filter(
+    (vehicle) => vehicle.vehicleType === 'u_bahn',
   )
   const sBahnVehicles = scenegraphVehicles.filter(
     (vehicle) => vehicle.vehicleType === 'train',
@@ -73,17 +72,17 @@ export function createProductionScenegraphLayers(
   const regionalVehicles = scenegraphVehicles.filter(
     (vehicle) => vehicle.vehicleType === 'regional',
   )
-  const labelVehicles = scenegraphVehicles.filter(hasValidRouteShortName)
+  const labelVehicles = labelSource.flatMap(toProductionScenegraphVehicle).filter(hasValidRouteShortName)
   const layers: Array<
     | ScenegraphLayer<ProductionScenegraphVehicle>
     | TextLayer<ProductionScenegraphVehicle>
   > = []
 
-  if (!failedVehicleTypes.has('bus')) {
+  if (busVehicles.length > 0 && !failedVehicleTypes.has('bus')) {
     layers.push(
       new ScenegraphLayer<ProductionScenegraphVehicle>({
         id: 'estimated-generic-vehicles-3d',
-        data: genericVehicles,
+        data: busVehicles,
         scenegraph: MODEL_URLS.bus,
         getPosition: getScenegraphPosition,
         getOrientation: getScenegraphOrientation,
@@ -101,7 +100,26 @@ export function createProductionScenegraphLayers(
     )
   }
 
-  if (!failedVehicleTypes.has('train')) {
+  if (uBahnVehicles.length > 0 && !failedVehicleTypes.has('u_bahn')) {
+    layers.push(
+      new ScenegraphLayer<ProductionScenegraphVehicle>({
+        id: 'estimated-u-bahn-3d',
+        data: uBahnVehicles,
+        scenegraph: MODEL_URLS.u_bahn,
+        getPosition: getScenegraphPosition,
+        getOrientation: getScenegraphOrientation,
+        getTranslation: getScenegraphTranslation,
+        sizeScale: MODEL_SIZE_SCALES.u_bahn,
+        sizeMaxPixels: 220,
+        transitions: VEHICLE_POSITION_TRANSITION,
+        pickable: true,
+        _lighting: 'pbr',
+        onError: getScenegraphErrorHandler(onScenegraphAssetError, 'u_bahn'),
+      }),
+    )
+  }
+
+  if (sBahnVehicles.length > 0 && !failedVehicleTypes.has('train')) {
     layers.push(
       new ScenegraphLayer<ProductionScenegraphVehicle>({
         id: 'estimated-s-bahn-3d',
@@ -123,7 +141,7 @@ export function createProductionScenegraphLayers(
     )
   }
 
-  if (!failedVehicleTypes.has('tram')) {
+  if (tramVehicles.length > 0 && !failedVehicleTypes.has('tram')) {
     layers.push(
       new ScenegraphLayer<ProductionScenegraphVehicle>({
         id: 'estimated-trams-3d',
@@ -145,7 +163,7 @@ export function createProductionScenegraphLayers(
     )
   }
 
-  if (!failedVehicleTypes.has('regional')) {
+  if (regionalVehicles.length > 0 && !failedVehicleTypes.has('regional')) {
     layers.push(
       new ScenegraphLayer<ProductionScenegraphVehicle>({
         id: 'estimated-regional-3d',
@@ -167,14 +185,18 @@ export function createProductionScenegraphLayers(
     )
   }
 
-  layers.push(
+  if (labelVehicles.length > 0) layers.push(
     new TextLayer<ProductionScenegraphVehicle>({
       id: 'vehicle-labels',
       data: labelVehicles,
       getPosition: getVehicleLabelPosition,
       getText: (vehicle) => vehicle.route_short_name ?? '',
       getSize: 16,
-      getColor: LABEL_COLOR,
+      getColor: (vehicle) =>
+        getBerlinTransitLineColorRgb(
+          vehicle.route_short_name,
+          vehicle.vehicle_category,
+        ),
       billboard: true,
       getTextAnchor: 'middle',
       getAlignmentBaseline: 'bottom',
@@ -264,6 +286,6 @@ function getVehicleLabelPosition(
   return [
     vehicle.longitude,
     vehicle.latitude,
-    LABEL_ELEVATION_BY_VEHICLE_TYPE[vehicle.vehicleType],
+    MODEL_HEIGHTS_METERS[vehicle.vehicleType] * MODEL_SIZE_SCALES[vehicle.vehicleType] + LABEL_CLEARANCE_METERS,
   ]
 }

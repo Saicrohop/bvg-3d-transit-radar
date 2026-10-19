@@ -1,104 +1,198 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
-  isEstimatedVehiclePosition,
-  normalizeEstimatedVehiclePosition,
-  upsertVehiclePosition,
+  calculateReconnectDelay,
+  DEFAULT_CONNECTION_POLICY,
+  evaluateSnapshotFreshness,
+  type SnapshotFreshnessReason,
+  type SnapshotFreshnessStatus,
+} from './connectionPolicy'
+import {
+  parseVehiclePositionSnapshotMessage,
   type EstimatedVehiclePosition,
-  type VehiclePositionsByTrip,
+  type VehiclePositionSnapshot,
 } from './vehiclePositions'
-
-export const POSITION_BATCH_QUIET_PERIOD_MS = 250
 
 export type WebSocketConnectionStatus =
   | 'connecting'
   | 'open'
+  | 'reconnecting'
   | 'closed'
   | 'error'
 
+type ConnectionState = Readonly<{
+  url: string
+  connectionStatus: WebSocketConnectionStatus
+  snapshot: VehiclePositionSnapshot | null
+  lastSnapshotReceivedAtMs: number | null
+  rejectedMessages: number
+}>
+
+const EMPTY_VEHICLES: readonly EstimatedVehiclePosition[] = []
+
+function initialState(url: string): ConnectionState {
+  return {
+    url,
+    connectionStatus: 'connecting',
+    snapshot: null,
+    lastSnapshotReceivedAtMs: null,
+    rejectedMessages: 0,
+  }
+}
+
 export function useEstimatedVehiclePositions(url: string) {
-  const [vehiclesByTrip, setVehiclesByTrip] = useState<VehiclePositionsByTrip>(
-    {},
-  )
-  const [connectionStatus, setConnectionStatus] =
-    useState<WebSocketConnectionStatus>('connecting')
+  const [state, setState] = useState(() => initialState(url))
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  const currentState = state.url === url ? state : initialState(url)
+  const freshness = evaluateSnapshotFreshness({
+    snapshot: currentState.snapshot,
+    receivedAtMs: currentState.lastSnapshotReceivedAtMs,
+    nowMs,
+  })
 
   useEffect(() => {
-    let isCurrentConnection = true
-    let pendingFlush: ReturnType<typeof setTimeout> | null = null
-    const pendingEventsByTrip = new Map<string, EstimatedVehiclePosition>()
-    const socket = new WebSocket(url)
+    let disposed = false
+    let socket: WebSocket | null = null
+    let reconnectTimer: number | null = null
+    let reconnectAttempt = 0
 
-    const flushPendingEvents = () => {
-      pendingFlush = null
-      if (!isCurrentConnection || pendingEventsByTrip.size === 0) {
+    setState(current => current.url === url ? current : initialState(url))
+
+    function isActive(candidate: WebSocket) {
+      return !disposed && socket === candidate
+    }
+
+    function scheduleReconnect() {
+      if (disposed || reconnectTimer !== null) {
         return
       }
 
-      const events = [...pendingEventsByTrip.values()]
-      pendingEventsByTrip.clear()
-      setVehiclesByTrip((current) =>
-        events.reduce(upsertVehiclePosition, current),
-      )
+      const delay = calculateReconnectDelay(reconnectAttempt, Math.random())
+      reconnectAttempt += 1
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null
+        connect(true)
+      }, delay)
     }
 
-    socket.onopen = () => {
-      if (isCurrentConnection) {
-        setConnectionStatus('open')
+    function connect(isRetry: boolean) {
+      if (disposed) {
+        return
       }
-    }
-    socket.onmessage = (message) => {
-      const event = parseEstimatedPosition(message.data)
-      if (isCurrentConnection && event !== null) {
-        pendingEventsByTrip.set(event.trip_id, event)
-        if (pendingFlush !== null) {
-          clearTimeout(pendingFlush)
+
+      setState(current => current.url === url
+        ? { ...current, connectionStatus: isRetry ? 'reconnecting' : 'connecting' }
+        : current)
+
+      let candidate: WebSocket
+      try {
+        candidate = new WebSocket(url)
+      } catch {
+        setState(current => current.url === url
+          ? { ...current, connectionStatus: 'error' }
+          : current)
+        return
+      }
+      socket = candidate
+
+      candidate.onopen = () => {
+        if (!isActive(candidate)) return
+        setNowMs(Date.now())
+        setState(current => current.url === url
+          ? { ...current, connectionStatus: 'open' }
+          : current)
+      }
+
+      candidate.onmessage = message => {
+        if (!isActive(candidate)) return
+        const nextSnapshot = parseVehiclePositionSnapshotMessage(message.data)
+        if (nextSnapshot === null) {
+          setState(current => current.url === url
+            ? { ...current, rejectedMessages: current.rejectedMessages + 1 }
+            : current)
+          return
         }
-        pendingFlush = setTimeout(
-          flushPendingEvents,
-          POSITION_BATCH_QUIET_PERIOD_MS,
-        )
+
+        const receivedAtMs = Date.now()
+        reconnectAttempt = 0
+        setNowMs(receivedAtMs)
+        setState(current => current.url === url
+          ? {
+              ...current,
+              snapshot: nextSnapshot,
+              lastSnapshotReceivedAtMs: receivedAtMs,
+            }
+          : current)
+      }
+
+      candidate.onerror = () => {
+        if (!isActive(candidate)) return
+        setState(current => current.url === url
+          ? { ...current, connectionStatus: 'error' }
+          : current)
+        socket = null
+        candidate.close()
+        scheduleReconnect()
+      }
+
+      candidate.onclose = () => {
+        if (!isActive(candidate)) return
+        socket = null
+        setNowMs(Date.now())
+        setState(current => current.url === url
+          ? { ...current, connectionStatus: 'reconnecting' }
+          : current)
+        scheduleReconnect()
       }
     }
-    socket.onerror = () => {
-      if (isCurrentConnection) {
-        setConnectionStatus('error')
-      }
-    }
-    socket.onclose = () => {
-      if (isCurrentConnection) {
-        setConnectionStatus('closed')
-      }
-    }
+
+    connect(false)
 
     return () => {
-      isCurrentConnection = false
-      if (pendingFlush !== null) {
-        clearTimeout(pendingFlush)
+      disposed = true
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer)
+        reconnectTimer = null
       }
-      socket.close()
+      const activeSocket = socket
+      socket = null
+      activeSocket?.close()
     }
   }, [url])
 
-  const vehicles = useMemo(
-    () => Object.values(vehiclesByTrip),
-    [vehiclesByTrip],
-  )
+  useEffect(() => {
+    if (
+      state.url !== url ||
+      state.snapshot === null ||
+      state.lastSnapshotReceivedAtMs === null
+    ) {
+      return undefined
+    }
 
-  return { connectionStatus, vehicles }
+    const staleAt = getEarliestStaleTime(state.snapshot, state.lastSnapshotReceivedAtMs)
+    const delay = Math.max(0, staleAt - Date.now())
+    const timer = window.setTimeout(() => setNowMs(Date.now()), delay)
+    return () => window.clearTimeout(timer)
+  }, [state.lastSnapshotReceivedAtMs, state.snapshot, state.url, url])
+
+  return {
+    connectionStatus: currentState.connectionStatus,
+    vehicles: currentState.snapshot?.positions ?? EMPTY_VEHICLES,
+    snapshot: currentState.snapshot,
+    rejectedMessages: currentState.rejectedMessages,
+    dataStatus: freshness.status as SnapshotFreshnessStatus,
+    dataStatusReason: freshness.reason as SnapshotFreshnessReason,
+  }
 }
 
-function parseEstimatedPosition(data: unknown) {
-  if (typeof data !== 'string') {
-    return null
-  }
-
-  try {
-    const event: unknown = JSON.parse(data)
-    return isEstimatedVehiclePosition(event)
-      ? normalizeEstimatedVehiclePosition(event)
-      : null
-  } catch {
-    return null
-  }
+function getEarliestStaleTime(
+  snapshot: VehiclePositionSnapshot,
+  receivedAtMs: number,
+): number {
+  const provenanceTimes = [
+    Date.parse(snapshot.observed_at),
+    snapshot.feed_timestamp === null ? Number.POSITIVE_INFINITY : Date.parse(snapshot.feed_timestamp),
+    receivedAtMs,
+  ]
+  return Math.min(...provenanceTimes.map(timestamp => timestamp + DEFAULT_CONNECTION_POLICY.staleAfterMs))
 }

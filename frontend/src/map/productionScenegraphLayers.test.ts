@@ -14,6 +14,18 @@ const estimatedVehicles: readonly EstimatedVehiclePosition[] = [
     type: 'vehicle_position',
     source: 'trip_update_interpolation',
     is_estimated: true,
+    position_status: 'estimated_from_trip_update',
+    timing_source: 'schedule_only',
+    delay_seconds: null,
+    feed_timestamp: null,
+    trip_update_timestamp: null,
+    service_date: '2026-07-19',
+    entity_id: 'test-entity',
+    shape_id: 'test-shape',
+    previous_stop_id: 'test-stop-a',
+    next_stop_id: 'test-stop-b',
+    estimated_next_arrival: '2026-07-19T12:02:00Z',
+    observed_at: '2026-07-19T12:00:00Z',
     vehicle_category: 's_bahn',
     trip_id: 's41-trip',
     route_id: 's41-route',
@@ -27,6 +39,18 @@ const estimatedVehicles: readonly EstimatedVehiclePosition[] = [
     type: 'vehicle_position',
     source: 'trip_update_interpolation',
     is_estimated: true,
+    position_status: 'estimated_from_trip_update',
+    timing_source: 'schedule_only',
+    delay_seconds: null,
+    feed_timestamp: null,
+    trip_update_timestamp: null,
+    service_date: '2026-07-19',
+    entity_id: 'test-entity',
+    shape_id: 'test-shape',
+    previous_stop_id: 'test-stop-a',
+    next_stop_id: 'test-stop-b',
+    estimated_next_arrival: '2026-07-19T12:02:00Z',
+    observed_at: '2026-07-19T12:00:00Z',
     vehicle_category: 'u_bahn',
     trip_id: 'u2-trip',
     route_id: 'u2-route',
@@ -40,6 +64,18 @@ const estimatedVehicles: readonly EstimatedVehiclePosition[] = [
     type: 'vehicle_position',
     source: 'trip_update_interpolation',
     is_estimated: true,
+    position_status: 'estimated_from_trip_update',
+    timing_source: 'schedule_only',
+    delay_seconds: null,
+    feed_timestamp: null,
+    trip_update_timestamp: null,
+    service_date: '2026-07-19',
+    entity_id: 'test-entity',
+    shape_id: 'test-shape',
+    previous_stop_id: 'test-stop-a',
+    next_stop_id: 'test-stop-b',
+    estimated_next_arrival: '2026-07-19T12:02:00Z',
+    observed_at: '2026-07-19T12:00:00Z',
     vehicle_category: 'bus',
     trip_id: '100-trip',
     route_id: '100-route',
@@ -53,6 +89,18 @@ const estimatedVehicles: readonly EstimatedVehiclePosition[] = [
     type: 'vehicle_position',
     source: 'trip_update_interpolation',
     is_estimated: true,
+    position_status: 'estimated_from_trip_update',
+    timing_source: 'schedule_only',
+    delay_seconds: null,
+    feed_timestamp: null,
+    trip_update_timestamp: null,
+    service_date: '2026-07-19',
+    entity_id: 'test-entity',
+    shape_id: 'test-shape',
+    previous_stop_id: 'test-stop-a',
+    next_stop_id: 'test-stop-b',
+    estimated_next_arrival: '2026-07-19T12:02:00Z',
+    observed_at: '2026-07-19T12:00:00Z',
     vehicle_category: 'tram',
     trip_id: 'm4-trip',
     route_id: 'm4-route',
@@ -66,6 +114,18 @@ const estimatedVehicles: readonly EstimatedVehiclePosition[] = [
     type: 'vehicle_position',
     source: 'trip_update_interpolation',
     is_estimated: true,
+    position_status: 'estimated_from_trip_update',
+    timing_source: 'schedule_only',
+    delay_seconds: null,
+    feed_timestamp: null,
+    trip_update_timestamp: null,
+    service_date: '2026-07-19',
+    entity_id: 'test-entity',
+    shape_id: 'test-shape',
+    previous_stop_id: 'test-stop-a',
+    next_stop_id: 'test-stop-b',
+    estimated_next_arrival: '2026-07-19T12:02:00Z',
+    observed_at: '2026-07-19T12:00:00Z',
     vehicle_category: 'regional',
     trip_id: 'fex-trip',
     route_id: 'fex-route',
@@ -79,6 +139,18 @@ const estimatedVehicles: readonly EstimatedVehiclePosition[] = [
     type: 'vehicle_position',
     source: 'trip_update_interpolation',
     is_estimated: true,
+    position_status: 'estimated_from_trip_update',
+    timing_source: 'schedule_only',
+    delay_seconds: null,
+    feed_timestamp: null,
+    trip_update_timestamp: null,
+    service_date: '2026-07-19',
+    entity_id: 'test-entity',
+    shape_id: 'test-shape',
+    previous_stop_id: 'test-stop-a',
+    next_stop_id: 'test-stop-b',
+    estimated_next_arrival: '2026-07-19T12:02:00Z',
+    observed_at: '2026-07-19T12:00:00Z',
     vehicle_category: null,
     trip_id: 'unknown-trip',
     route_id: 'unknown-route',
@@ -137,37 +209,49 @@ function getLayerData(
 }
 
 describe('createProductionScenegraphLayers', () => {
-  it('maps only bus and U-Bahn categories onto the calibrated BVG model', () => {
+  it('accepts an independently budgeted label set without instantiating models for those point trips', () => {
+    const layers = createProductionScenegraphLayers([estimatedVehicles[0]!], {
+      labelVehicles: [estimatedVehicles[3]!],
+    })
+    expect(layers.map((layer) => layer.id)).toEqual(['estimated-s-bahn-3d', 'vehicle-labels'])
+    expect(layers.find((layer) => layer.id === 'vehicle-labels')?.props.data)
+      .toEqual([expect.objectContaining({ trip_id: 'm4-trip', vehicleType: 'tram' })])
+    expect(createProductionScenegraphLayers([estimatedVehicles[0]!], { labelVehicles: [] })
+      .map((layer) => layer.id)).toEqual(['estimated-s-bahn-3d'])
+  })
+
+  it('constructs no scenegraph objects or async GLB props for empty categories', () => {
+    expect(createProductionScenegraphLayers([])).toEqual([])
+    const layers = createProductionScenegraphLayers([estimatedVehicles[0]!])
+    expect(layers.filter((layer) => layer instanceof ScenegraphLayer).map((layer) => layer.id))
+      .toEqual(['estimated-s-bahn-3d'])
+    expect(layers.every((layer) => (layer.props.data as unknown[]).length > 0)).toBe(true)
+  })
+
+  it('maps only bus trips onto the versioned bus model, not U-Bahn trips', () => {
     const layers = createProductionScenegraphLayers(estimatedVehicles)
     const genericLayer = layers.find(
       (layer) => layer.id === 'estimated-generic-vehicles-3d',
     ) as ScenegraphLayer<ProductionScenegraphVehicle> | undefined
     const genericVehicles = getLayerData(genericLayer)
 
-    expect(getScenegraphUrl(genericLayer)).toBe('/models/bvg_bus.glb')
-    expect(genericLayer?.props.sizeScale).toBe(20)
+    expect(getScenegraphUrl(genericLayer)).toBe('/models/lowpoly/bvg_bus_lowpoly_v3.glb')
+    expect(genericLayer?.props.sizeScale).toBe(1)
     expect(genericLayer?.props._lighting).toBe('pbr')
     expect(genericLayer?.props.transitions).toEqual({ getPosition: 1000 })
     expect(genericVehicles.map((vehicle) => vehicle.trip_id)).toEqual([
-      'u2-trip',
       '100-trip',
     ])
 
-    const u2 = genericVehicles[0]
-    const route100 = genericVehicles[1]
+    const route100 = genericVehicles[0]
 
-    if (u2 === undefined || route100 === undefined) {
+    if (route100 === undefined) {
       throw new Error('Expected categorized production vehicles')
     }
 
-    expect(getOrientationFromScenegraphLayer(genericLayer, u2)).toEqual([
-      0,
-      90,
-      90,
-    ])
     expect(getOrientationFromScenegraphLayer(genericLayer, route100)).toEqual([
       0,
-      -90,
+      0,
       90,
     ])
     expect(genericVehicles.map((vehicle) => vehicle.trip_id)).not.toContain(
@@ -184,8 +268,8 @@ describe('createProductionScenegraphLayers', () => {
     const m4 = trams[0]
 
     expect(tramLayer).toBeInstanceOf(ScenegraphLayer)
-    expect(getScenegraphUrl(tramLayer)).toBe('/models/bvg_tram.glb')
-    expect(tramLayer?.props.sizeScale).toBe(22)
+    expect(getScenegraphUrl(tramLayer)).toBe('/models/lowpoly/bvg_tram_lowpoly_v1.glb')
+    expect(tramLayer?.props.sizeScale).toBe(1)
     expect(tramLayer?.props._lighting).toBe('pbr')
     expect(tramLayer?.props.transitions).toEqual({ getPosition: 1000 })
     expect(trams.map((vehicle) => vehicle.trip_id)).toEqual(['m4-trip'])
@@ -196,7 +280,7 @@ describe('createProductionScenegraphLayers', () => {
 
     expect(getOrientationFromScenegraphLayer(tramLayer, m4)).toEqual([
       0,
-      -180,
+      -90,
       90,
     ])
   })
@@ -208,8 +292,8 @@ describe('createProductionScenegraphLayers', () => {
     ) as ScenegraphLayer<ProductionScenegraphVehicle> | undefined
 
     expect(sBahnLayer).toBeInstanceOf(ScenegraphLayer)
-    expect(getScenegraphUrl(sBahnLayer)).toBe('/models/s_bahn_db.glb')
-    expect(sBahnLayer?.props.sizeScale).toBe(0.75)
+    expect(getScenegraphUrl(sBahnLayer)).toBe('/models/lowpoly/s_bahn_lowpoly_v1.glb')
+    expect(sBahnLayer?.props.sizeScale).toBe(1)
     expect(sBahnLayer?.props._lighting).toBe('pbr')
     expect(sBahnLayer?.props.transitions).toEqual({ getPosition: 1000 })
 
@@ -241,8 +325,8 @@ describe('createProductionScenegraphLayers', () => {
     const fex = regionalVehicles[0]
 
     expect(regionalLayer).toBeInstanceOf(ScenegraphLayer)
-    expect(getScenegraphUrl(regionalLayer)).toBe('/models/regional_bahn.glb')
-    expect(regionalLayer?.props.sizeScale).toBe(9)
+    expect(getScenegraphUrl(regionalLayer)).toBe('/models/lowpoly/regional_lowpoly_v2.glb')
+    expect(regionalLayer?.props.sizeScale).toBe(1)
     expect(regionalLayer?.props._lighting).toBe('pbr')
     expect(regionalLayer?.props.transitions).toEqual({ getPosition: 1000 })
     expect(regionalVehicles.map((vehicle) => vehicle.trip_id)).toEqual([
@@ -255,7 +339,7 @@ describe('createProductionScenegraphLayers', () => {
 
     expect(getOrientationFromScenegraphLayer(regionalLayer, fex)).toEqual([
       0,
-      45,
+      135,
       90,
     ])
     expect(
@@ -301,7 +385,7 @@ describe('createProductionScenegraphLayers', () => {
     ).toEqual(['s41-trip', 'u2-trip', '100-trip', 'm4-trip', 'fex-trip'])
     expect(labelLayer?.props.billboard).toBe(true)
     expect(labelLayer?.props.getSize).toBe(16)
-    expect(labelLayer?.props.getColor).toEqual([255, 255, 255])
+    expect(typeof labelLayer?.props.getColor).toBe('function')
     expect(labelLayer?.props.transitions).toEqual({ getPosition: 1000 })
 
     const fex = (data as readonly ProductionScenegraphVehicle[]).find(
@@ -318,13 +402,15 @@ describe('createProductionScenegraphLayers', () => {
     )
     const getPosition = labelLayer?.props.getPosition
     const getText = labelLayer?.props.getText
+    const getColor = labelLayer?.props.getColor
     if (
       fex === undefined ||
       s41 === undefined ||
       u2 === undefined ||
       m4 === undefined ||
       typeof getPosition !== 'function' ||
-      typeof getText !== 'function'
+      typeof getText !== 'function' ||
+      typeof getColor !== 'function'
     ) {
       throw new Error('Expected configured TextLayer accessors')
     }
@@ -335,30 +421,36 @@ describe('createProductionScenegraphLayers', () => {
           vehicle: ProductionScenegraphVehicle,
         ) => number[]
       )(fex),
-    ).toEqual([13.409, 52.524, 6])
+    ).toEqual([13.409, 52.524, 6.6])
     expect(
       (
         getPosition as unknown as (
           vehicle: ProductionScenegraphVehicle,
         ) => number[]
       )(s41),
-    ).toEqual([13.405, 52.52, 2])
+    ).toEqual([13.405, 52.52, 5.6])
     expect(
       (
         getPosition as unknown as (
           vehicle: ProductionScenegraphVehicle,
         ) => number[]
       )(u2),
-    ).toEqual([13.406, 52.521, 15])
+    ).toEqual([13.406, 52.521, 5.5])
     expect(
       (
         getPosition as unknown as (
           vehicle: ProductionScenegraphVehicle,
         ) => number[]
       )(m4),
-    ).toEqual([13.408, 52.523, 5])
+    ).toEqual([13.408, 52.523, 5.4])
     expect((getText as (vehicle: ProductionScenegraphVehicle) => string)(fex)).toBe(
       'FEX',
     )
+    const getLineRgb = getColor as unknown as (
+      vehicle: ProductionScenegraphVehicle,
+    ) => readonly number[]
+    expect(getLineRgb(s41)).toEqual([173, 89, 55])
+    expect(getLineRgb(u2)).toEqual([218, 66, 30])
+    expect(getLineRgb(m4)).toEqual([255, 150, 124])
   })
 })

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 from google.transit import gtfs_realtime_pb2
@@ -303,6 +303,54 @@ def test_normalizes_trip_update_with_absolute_times_and_delays() -> None:
     assert result.stop_time_updates[0].arrival_delay_seconds == 90
     assert result.stop_time_updates[0].departure_time is None
     assert result.stop_time_updates[0].departure_delay_seconds == 60
+
+
+def test_drops_unrepresentable_stop_sequence_and_keeps_stop_id_fallback() -> None:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    entity = feed.entity.add()
+    entity.id = "entity-overflow-sequence"
+    entity.trip_update.trip.trip_id = "trip-42"
+    entity.trip_update.trip.route_id = "route-7"
+    entity.trip_update.trip.start_date = "20260719"
+    stop_update = entity.trip_update.stop_time_update.add()
+    stop_update.stop_sequence = 2**31
+    stop_update.stop_id = "stop-3"
+
+    normalized = snapshot_from_feed(feed).trip_updates[0].stop_time_updates[0]
+
+    assert normalized.stop_sequence is None
+    assert normalized.stop_id == "stop-3"
+    assert normalized.to_estimator_payload() == {"stop_id": "stop-3"}
+
+
+def test_drops_absolute_stop_times_far_from_service_day_but_keeps_int32_delays() -> None:
+    feed = gtfs_realtime_pb2.FeedMessage()
+    entity = feed.entity.add()
+    entity.id = "entity-overflow-delay"
+    entity.trip_update.trip.trip_id = "trip-42"
+    entity.trip_update.trip.route_id = "route-7"
+    entity.trip_update.trip.start_date = "20260719"
+    stop_update = entity.trip_update.stop_time_update.add()
+    stop_update.stop_sequence = 3
+    stop_update.stop_id = "stop-3"
+    far_future = int(datetime(2099, 7, 19, tzinfo=timezone.utc).timestamp())
+    stop_update.arrival.time = far_future
+    stop_update.arrival.delay = 75
+    stop_update.departure.time = far_future
+    stop_update.departure.delay = 60
+
+    normalized = snapshot_from_feed(feed).trip_updates[0].stop_time_updates[0]
+
+    assert normalized.arrival_time is None
+    assert normalized.departure_time is None
+    assert normalized.arrival_delay_seconds == 75
+    assert normalized.departure_delay_seconds == 60
+    assert normalized.to_estimator_payload() == {
+        "stop_sequence": 3,
+        "stop_id": "stop-3",
+        "arrival_delay_seconds": 75,
+        "departure_delay_seconds": 60,
+    }
 
 
 def test_ignores_trip_update_without_static_trip_identity() -> None:

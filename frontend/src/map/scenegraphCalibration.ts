@@ -1,4 +1,4 @@
-export type CalibrationVehicleType = 'bus' | 'train' | 'tram' | 'regional'
+export type CalibrationVehicleType = 'bus' | 'u_bahn' | 'train' | 'tram' | 'regional'
 
 export type ScenegraphVehicle = Readonly<{
   latitude: number
@@ -14,21 +14,26 @@ export type ScenegraphCalibrationVehicle = ScenegraphVehicle &
 }>
 
 export const MODEL_URLS: Readonly<Record<CalibrationVehicleType, string>> = {
-  bus: '/models/bvg_bus.glb',
-  train: '/models/s_bahn_db.glb',
-  tram: '/models/bvg_tram.glb',
-  regional: '/models/regional_bahn.glb',
+  bus: '/models/lowpoly/bvg_bus_lowpoly_v3.glb',
+  u_bahn: '/models/lowpoly/u_bahn_lowpoly_v2.glb',
+  train: '/models/lowpoly/s_bahn_lowpoly_v1.glb',
+  tram: '/models/lowpoly/bvg_tram_lowpoly_v1.glb',
+  regional: '/models/lowpoly/regional_lowpoly_v2.glb',
 }
 
+// CPU-verified source frame: +Y up, declared front +Z; map frame is ENU.
+// This is a mathematical calibration, not visual confirmation of the front.
 const MODEL_YAW_OFFSETS: Readonly<Record<CalibrationVehicleType, number>> = {
-  bus: 90,
+  bus: 180,
+  u_bahn: 180,
   train: 180,
-  tram: 90,
-  regional: 90,
+  tram: 180,
+  regional: 180,
 }
 
 const MODEL_ROLL_OFFSETS: Readonly<Record<CalibrationVehicleType, number>> = {
   bus: 90,
+  u_bahn: 90,
   train: 90,
   tram: 90,
   regional: 90,
@@ -37,19 +42,29 @@ const MODEL_ROLL_OFFSETS: Readonly<Record<CalibrationVehicleType, number>> = {
 export const MODEL_SIZE_SCALES: Readonly<
   Record<CalibrationVehicleType, number>
 > = {
-  bus: 20,
-  train: 0.75,
-  tram: 22,
-  regional: 9,
+  bus: 1,
+  u_bahn: 1,
+  train: 1,
+  tram: 1,
+  regional: 1,
 }
 
 const MODEL_TRANSLATIONS: Readonly<
   Record<CalibrationVehicleType, readonly [number, number, number]>
 > = {
-  bus: [0, 0, 6.293897],
+  bus: [0, 0, 0],
+  u_bahn: [0, 0, 0],
   train: [0, 0, 0],
-  tram: [0, 0, 1.3463450148701668],
-  regional: [0, 0, 2.0698822885751724],
+  tram: [0, 0, 0],
+  regional: [0, 0, 0],
+}
+
+export const MODEL_HEIGHTS_METERS: Readonly<Record<CalibrationVehicleType, number>> = {
+  bus: 3.2,
+  u_bahn: 3.5,
+  train: 3.6,
+  tram: 3.4,
+  regional: 4.6,
 }
 
 export const MOCK_CALIBRATION_VEHICLES: readonly ScenegraphCalibrationVehicle[] = [

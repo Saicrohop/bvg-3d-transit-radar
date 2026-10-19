@@ -24,9 +24,11 @@
     "test": "npm run test:phase1 && npm run test:phase2:sql && npm run test:python",
     "test:frontend": "npm --prefix frontend run test",
     "test:integration:local": "uv run pytest tests/integration -m integration -v -rs",
+    "benchmark:p7:local": "uv run python scripts/benchmark_realtime_cycle.py",
     "lint:frontend": "npm --prefix frontend run lint",
     "build:frontend": "npm --prefix frontend run build",
     "verify": "npm run test && npm run test:frontend && npm run lint:frontend && npm run build:frontend",
+    "runtime:check": "node scripts/check_local_runtime.cjs --json",
     "ws:client": "uv run python scripts/ws_positions_client.py",
     "ws:serve": "uv run uvicorn bvg_radar.server:create_app --factory --host 127.0.0.1 --port 8000"
   },

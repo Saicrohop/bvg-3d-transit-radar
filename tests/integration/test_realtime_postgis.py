@@ -1,18 +1,18 @@
 import asyncio
 import math
 import os
+from dataclasses import replace
 from datetime import timedelta
-from urllib.parse import urlsplit
 
 import asyncpg
 import pytest
 
+from bvg_radar.realtime.benchmark import validate_local_database_url
 from bvg_radar.realtime.models import StopTimeUpdate, TripUpdate
 from bvg_radar.realtime.postgis import PostgisTripPositionEstimator
 
 pytestmark = pytest.mark.integration
 
-EXPECTED_LOCAL_DB_PORT = 54022
 CANDIDATE_SEGMENT_SQL = """
 SELECT
     stop_time.trip_id,
@@ -61,17 +61,10 @@ def _local_database_url() -> str:
             "BVG_DATABASE_URL is not set; local PostGIS integration was not run"
         )
 
-    parsed = urlsplit(database_url)
-    if parsed.scheme not in {"postgres", "postgresql"}:
-        pytest.fail("BVG_DATABASE_URL must be a PostgreSQL URL")
-    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
-        pytest.fail("PostGIS integration is restricted to a loopback database")
-    if parsed.port != EXPECTED_LOCAL_DB_PORT:
-        pytest.fail(
-            f"PostGIS integration requires the project-local port "
-            f"{EXPECTED_LOCAL_DB_PORT}"
-        )
-    return database_url
+    try:
+        return validate_local_database_url(database_url)
+    except ValueError as error:
+        pytest.fail(str(error), pytrace=False)
 
 
 async def _exercise_real_postgis_adapter(database_url: str) -> None:
@@ -79,11 +72,14 @@ async def _exercise_real_postgis_adapter(database_url: str) -> None:
     try:
         async with connection.transaction(readonly=True):
             candidate = await connection.fetchrow(CANDIDATE_SEGMENT_SQL)
-            assert candidate is not None, "no safe segment exists in the current GTFS snapshot"
+            assert candidate is not None, (
+                "no safe segment exists in the current GTFS snapshot"
+            )
 
-            observed_at = candidate["departure_at"] + (
-                candidate["next_arrival_at"] - candidate["departure_at"]
-            ) / 2
+            observed_at = (
+                candidate["departure_at"]
+                + (candidate["next_arrival_at"] - candidate["departure_at"]) / 2
+            )
             update = TripUpdate(
                 entity_id="postgis-integration-probe",
                 trip_id=str(candidate["trip_id"]),
@@ -115,6 +111,15 @@ async def _exercise_real_postgis_adapter(database_url: str) -> None:
             assert result.previous_stop_id == candidate["previous_stop_id"]
             assert result.next_stop_id == candidate["next_stop_id"]
             assert result.delay_seconds == 120
+            assert result.timing_source == "realtime_delay"
+            assert result.trip_update_timestamp is not None
+            assert int(result.trip_update_timestamp.timestamp()) == int(
+                observed_at.timestamp()
+            )
+            assert result.service_date == candidate["service_date"]
+            assert result.feed_timestamp is None
+            assert result.is_estimated is True
+            assert result.position_status == "estimated_from_trip_update"
             assert result.estimated_next_arrival == candidate[
                 "next_arrival_at"
             ] + timedelta(seconds=120)
@@ -127,6 +132,84 @@ async def _exercise_real_postgis_adapter(database_url: str) -> None:
             assert -90.0 <= result.latitude <= 90.0
             assert 0.0 <= result.bearing_degrees < 360.0
             assert result.speed_mps >= 0.0
+
+            schedule_only_update = TripUpdate(
+                entity_id="postgis-schedule-only-probe",
+                trip_id=str(candidate["trip_id"]),
+                route_id=str(candidate["route_id"]),
+                service_date=candidate["service_date"],
+                trip_update_timestamp=None,
+                stop_time_updates=(),
+            )
+            schedule_only_result = await PostgisTripPositionEstimator(
+                connection
+            ).estimate(schedule_only_update, observed_at)
+
+            assert schedule_only_result is not None
+            assert schedule_only_result.timing_source == "schedule_only"
+            assert schedule_only_result.delay_seconds is None
+            assert schedule_only_result.trip_update_timestamp is None
+
+            absolute_arrival = candidate["next_arrival_at"] + timedelta(seconds=90)
+            absolute_time_update = TripUpdate(
+                entity_id="postgis-absolute-time-probe",
+                trip_id=str(candidate["trip_id"]),
+                route_id=str(candidate["route_id"]),
+                service_date=candidate["service_date"],
+                trip_update_timestamp=int(observed_at.timestamp()),
+                stop_time_updates=(
+                    StopTimeUpdate(
+                        stop_sequence=int(candidate["next_stop_sequence"]),
+                        stop_id=str(candidate["next_stop_id"]),
+                        arrival_time=int(absolute_arrival.timestamp()),
+                        arrival_delay_seconds=None,
+                        departure_time=None,
+                        departure_delay_seconds=None,
+                    ),
+                ),
+            )
+            absolute_time_result = await PostgisTripPositionEstimator(
+                connection
+            ).estimate(absolute_time_update, observed_at)
+
+            assert absolute_time_result is not None
+            assert absolute_time_result.timing_source == "absolute_realtime_time"
+            assert absolute_time_result.delay_seconds == 90
+            assert absolute_time_result.estimated_next_arrival == absolute_arrival
+
+            batch_results = await PostgisTripPositionEstimator(
+                connection,
+                batch_size=3,
+            ).estimate_many(
+                (update, schedule_only_update, absolute_time_update),
+                observed_at,
+            )
+
+            assert len(batch_results) == 3
+            assert (
+                replace(
+                    batch_results[0],
+                    vehicle_category=None,
+                    route_short_name=None,
+                )
+                == result
+            )
+            assert (
+                replace(
+                    batch_results[1],
+                    vehicle_category=None,
+                    route_short_name=None,
+                )
+                == schedule_only_result
+            )
+            assert (
+                replace(
+                    batch_results[2],
+                    vehicle_category=None,
+                    route_short_name=None,
+                )
+                == absolute_time_result
+            )
     finally:
         await connection.close()
 

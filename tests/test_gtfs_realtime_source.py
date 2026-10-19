@@ -22,6 +22,7 @@ class FakeResponse:
     ) -> None:
         self.status = status
         self._payload = payload
+        self.content = self
         self.headers = {"Content-Type": content_type}
         if etag is not None:
             self.headers["ETag"] = etag
@@ -33,7 +34,11 @@ class FakeResponse:
         return None
 
     async def read(self) -> bytes:
-        return self._payload
+        raise AssertionError("polling must use bounded streaming")
+
+    async def iter_chunked(self, chunk_size: int):
+        for offset in range(0, len(self._payload), chunk_size):
+            yield self._payload[offset : offset + chunk_size]
 
 
 class FakeSession:

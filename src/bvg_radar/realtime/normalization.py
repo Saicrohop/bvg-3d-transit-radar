@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from google.protobuf.message import Message
 from google.protobuf.unknown_fields import UnknownFieldSet
@@ -12,7 +12,6 @@ from .models import (
     TripScheduleRelationship,
     TripUpdate,
 )
-
 
 _TRIP_SCHEDULE_RELATIONSHIPS = {
     gtfs_realtime_pb2.TripDescriptor.SCHEDULED: TripScheduleRelationship.SCHEDULED,
@@ -43,6 +42,11 @@ _STOP_SCHEDULE_RELATIONSHIPS = {
         StopScheduleRelationship.UNSCHEDULED
     ),
 }
+
+MAX_STOP_SEQUENCE = 2**31 - 1
+# Leave headroom below PostgreSQL INTEGER_MAX for GTFS schedule offsets (up to
+# the following service day) when SQL derives absolute-time delays.
+MAX_ABSOLUTE_STOP_TIME_OFFSET_SECONDS = 2_000_000_000
 
 
 def _trip_schedule_relationship(value: int) -> TripScheduleRelationship:
@@ -94,6 +98,84 @@ def _optional_integer(message: object, field_name: str) -> int | None:
     return getattr(message, field_name)
 
 
+class InvalidGtfsRealtimeTimestamp(ValueError):
+    """An upstream Unix timestamp cannot be represented by the application."""
+
+
+class InvalidGtfsRealtimeRecord(ValueError):
+    """An upstream value cannot be represented by the PostGIS estimator."""
+
+
+def timestamp_as_utc(value: int | None) -> datetime | None:
+    if value is None:
+        return None
+    if type(value) is not int:
+        raise InvalidGtfsRealtimeTimestamp("GTFS-RT timestamp must be an integer")
+    try:
+        return datetime.fromtimestamp(value, UTC)
+    except (OverflowError, OSError, ValueError) as error:
+        raise InvalidGtfsRealtimeTimestamp(
+            f"GTFS-RT timestamp is outside the supported datetime range: {value}"
+        ) from error
+
+
+def _optional_timestamp(message: object, field_name: str) -> int | None:
+    value = _optional_integer(message, field_name)
+    timestamp_as_utc(value)
+    return value
+
+
+def _service_day_start_seconds(service_date: date) -> int:
+    return int(
+        datetime(
+            service_date.year,
+            service_date.month,
+            service_date.day,
+            tzinfo=UTC,
+        ).timestamp()
+    )
+
+
+def _stop_time_timestamp_is_safe(value: int, service_date: date | None) -> bool:
+    return service_date is None or abs(
+        value - _service_day_start_seconds(service_date)
+    ) <= MAX_ABSOLUTE_STOP_TIME_OFFSET_SECONDS
+
+
+def _optional_stop_timestamp(
+    message: object,
+    field_name: str,
+    service_date: date | None,
+) -> int | None:
+    value = _optional_timestamp(message, field_name)
+    if value is not None and not _stop_time_timestamp_is_safe(value, service_date):
+        return None
+    return value
+
+
+def validate_snapshot_timestamps(snapshot: GtfsRealtimeSnapshot) -> None:
+    """Also guard normalized snapshots supplied by non-Protobuf source ports."""
+    timestamp_as_utc(snapshot.feed_timestamp)
+    for update in snapshot.trip_updates:
+        timestamp_as_utc(update.trip_update_timestamp)
+        for stop in update.stop_time_updates:
+            if stop.stop_sequence is not None and (
+                type(stop.stop_sequence) is not int
+                or not 0 <= stop.stop_sequence <= MAX_STOP_SEQUENCE
+            ):
+                raise InvalidGtfsRealtimeRecord(
+                    "GTFS-RT stop_sequence is outside PostgreSQL INTEGER range"
+                )
+            for value in (stop.arrival_time, stop.departure_time):
+                timestamp_as_utc(value)
+                if value is not None and not _stop_time_timestamp_is_safe(
+                    value, update.service_date
+                ):
+                    raise InvalidGtfsRealtimeTimestamp(
+                        "GTFS-RT stop time is outside the safe service-day range"
+                    )
+
+
 def _is_deleted(entity: gtfs_realtime_pb2.FeedEntity) -> bool:
     return entity.HasField("is_deleted") and entity.is_deleted
 
@@ -119,30 +201,35 @@ def _service_date_from_descriptor(
 
 def _normalize_stop_time_update(
     protobuf_update: gtfs_realtime_pb2.TripUpdate.StopTimeUpdate,
+    service_date: date | None,
 ) -> StopTimeUpdate | None:
     stop_sequence = _optional_integer(protobuf_update, "stop_sequence")
+    if stop_sequence is not None and not 0 <= stop_sequence <= MAX_STOP_SEQUENCE:
+        stop_sequence = None
     stop_id = protobuf_update.stop_id if protobuf_update.HasField("stop_id") else None
     if stop_sequence is None and stop_id is None:
         return None
 
     arrival = protobuf_update.arrival if protobuf_update.HasField("arrival") else None
-    departure = protobuf_update.departure if protobuf_update.HasField("departure") else None
+    departure = (
+        protobuf_update.departure if protobuf_update.HasField("departure") else None
+    )
     return StopTimeUpdate(
         stop_sequence=stop_sequence,
         stop_id=stop_id,
-        arrival_time=None if arrival is None else _optional_integer(arrival, "time"),
+        arrival_time=None
+        if arrival is None
+        else _optional_stop_timestamp(arrival, "time", service_date),
         arrival_delay_seconds=None
         if arrival is None
         else _optional_integer(arrival, "delay"),
         departure_time=None
         if departure is None
-        else _optional_integer(departure, "time"),
+        else _optional_stop_timestamp(departure, "time", service_date),
         departure_delay_seconds=None
         if departure is None
         else _optional_integer(departure, "delay"),
-        schedule_relationship=_stop_schedule_relationship_from_update(
-            protobuf_update
-        ),
+        schedule_relationship=_stop_schedule_relationship_from_update(protobuf_update),
     )
 
 
@@ -161,9 +248,7 @@ def trip_updates_from_feed(
 
         protobuf_update = entity.trip_update
         descriptor = protobuf_update.trip
-        schedule_relationship = _trip_schedule_relationship_from_descriptor(
-            descriptor
-        )
+        schedule_relationship = _trip_schedule_relationship_from_descriptor(descriptor)
         trip_id = _optional_text(descriptor, "trip_id")
         route_id = _optional_text(descriptor, "route_id")
         service_date = _service_date_from_descriptor(descriptor)
@@ -175,7 +260,10 @@ def trip_updates_from_feed(
         stop_time_updates = tuple(
             update
             for stop_update in protobuf_update.stop_time_update
-            if (update := _normalize_stop_time_update(stop_update)) is not None
+            if (
+                (update := _normalize_stop_time_update(stop_update, service_date))
+                is not None
+            )
         )
         normalized.append(
             TripUpdate(
@@ -183,7 +271,7 @@ def trip_updates_from_feed(
                 trip_id=trip_id,
                 route_id=route_id,
                 service_date=service_date,
-                trip_update_timestamp=_optional_integer(protobuf_update, "timestamp"),
+                trip_update_timestamp=_optional_timestamp(protobuf_update, "timestamp"),
                 stop_time_updates=stop_time_updates,
                 schedule_relationship=schedule_relationship,
             )
@@ -195,9 +283,16 @@ def trip_updates_from_feed(
 def snapshot_from_feed(
     feed: gtfs_realtime_pb2.FeedMessage,
 ) -> GtfsRealtimeSnapshot:
-    """Normalize feed-level provenance separately from entity timestamps."""
+    """Normalize only authoritative full feeds; deltas need a reconciler."""
+    if feed.header.incrementality != gtfs_realtime_pb2.FeedHeader.FULL_DATASET or any(
+        field.field_number
+        == feed.header.DESCRIPTOR.fields_by_name["incrementality"].number
+        for field in UnknownFieldSet(feed.header)
+    ):
+        # Proto2 returns the default FULL_DATASET for an unknown wire enum.
+        raise ValueError("only GTFS-RT FULL_DATASET incrementality is supported")
     return GtfsRealtimeSnapshot(
-        feed_timestamp=_optional_integer(feed.header, "timestamp"),
+        feed_timestamp=_optional_timestamp(feed.header, "timestamp"),
         trip_updates=trip_updates_from_feed(feed),
         deleted_entities=tuple(
             DeletedFeedEntity(entity_id=entity.id)

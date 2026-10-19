@@ -1,5 +1,5 @@
 import { TextLayer } from '@deck.gl/layers'
-import { ScenegraphLayer } from '@deck.gl/mesh-layers'
+import { VertexColorScenegraphLayer as ScenegraphLayer } from './vertexColorScenegraphLayer'
 
 import {
   getScenegraphOrientation,

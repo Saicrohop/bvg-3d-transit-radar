@@ -28,7 +28,7 @@ class FakeConnection:
         return None
 
 
-def test_terminal_client_prints_a_received_estimated_position() -> None:
+def test_terminal_client_rejects_a_legacy_incremental_position() -> None:
     event = {
         "type": "vehicle_position",
         "source": "trip_update_interpolation",
@@ -45,9 +45,9 @@ def test_terminal_client_prints_a_received_estimated_position() -> None:
             "ws://example.test/ws/positions",
             output=output,
             max_events=1,
-            connect=lambda _url: FakeConnection((json.dumps(event),)),
+            connect=lambda _url, **_kwargs: FakeConnection((json.dumps(event),)),
         )
     )
 
-    assert received == 1
-    assert json.loads(output.getvalue()) == event
+    assert received == 0
+    assert output.getvalue() == ""

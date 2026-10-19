@@ -1,8 +1,9 @@
 import { ScatterplotLayer } from '@deck.gl/layers'
 
 import type { EstimatedVehiclePosition } from '../realtime/vehiclePositions'
+import { getBerlinTransitLineColorRgb } from '../ui/berlinTransitColors'
 
-export const VEHICLE_FILL_COLOR = [255, 210, 0] as const
+export const VEHICLE_FILL_COLOR = [231, 255, 73] as const
 const VEHICLE_POSITION_TRANSITION = { getPosition: 1000 } as const
 
 export function getVehiclePosition(
@@ -19,7 +20,11 @@ export function createVehiclePointLayer(
     data: vehicles,
     getPosition: getVehiclePosition,
     transitions: VEHICLE_POSITION_TRANSITION,
-    getFillColor: () => VEHICLE_FILL_COLOR,
+    getFillColor: (vehicle) =>
+      getBerlinTransitLineColorRgb(
+        vehicle.route_short_name,
+        vehicle.vehicle_category,
+      ),
     getLineColor: () => [238, 80, 63],
     getRadius: () => 18,
     radiusUnits: 'meters',

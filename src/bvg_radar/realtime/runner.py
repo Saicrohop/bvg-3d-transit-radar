@@ -1,8 +1,8 @@
-"""One-cycle composition root for the server-side GTFS-Realtime ingestion engine.
+"""One-cycle composition root for the server-side GTFS-Realtime engine.
 
-This module deliberately writes JSON Lines to stdout for a dry-run. It does not
-create an HTTP or WebSocket server; a future delivery adapter can replace the
-publisher without changing the worker, source, or PostGIS estimator.
+This module deliberately writes one versioned position snapshot to stdout as
+JSON Lines. It does not create an HTTP or WebSocket server; the continuous
+FastAPI adapter composes the same worker with the WebSocket hub.
 """
 
 from __future__ import annotations
@@ -10,18 +10,19 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Sequence, TextIO
+from datetime import UTC, datetime
+from typing import TextIO
 
 import aiohttp
 import asyncpg
 
-from .gtfs_route_metadata import GtfsRouteMetadataLookup
-from .source import AiohttpGtfsRealtimeSource
 from .postgis import PostgisTripPositionEstimator
+from .source import AiohttpGtfsRealtimeSource
 from .worker import (
     IngestionRunResult,
     PositionEventPublisher,
@@ -42,20 +43,26 @@ class DryRunConfig:
     def __post_init__(self) -> None:
         if not self.database_url:
             raise ValueError("database_url is required")
-        if self.request_timeout_seconds <= 0:
-            raise ValueError("request_timeout_seconds must be positive")
-        if self.max_positions <= 0:
+        if (
+            type(self.request_timeout_seconds) not in (int, float)
+            or not math.isfinite(self.request_timeout_seconds)
+            or self.request_timeout_seconds <= 0
+        ):
+            raise ValueError("request_timeout_seconds must be finite and positive")
+        if type(self.max_positions) is not int or self.max_positions <= 0:
             raise ValueError("max_positions must be positive")
 
 
 class JsonLinePositionEventPublisher:
-    """Print future-WebSocket event payloads as one JSON object per line."""
+    """Print one WebSocket-ready snapshot envelope per JSON line."""
 
     def __init__(self, output: TextIO) -> None:
         self._output = output
 
     async def publish(self, event: dict[str, object]) -> None:
-        self._output.write(json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n")
+        self._output.write(
+            json.dumps(event, separators=(",", ":"), sort_keys=True) + "\n"
+        )
         self._output.flush()
 
 
@@ -69,7 +76,6 @@ def build_worker(
     return TripUpdateIngestionWorker(
         source=AiohttpGtfsRealtimeSource(session=session, url=feed_url),
         estimator=PostgisTripPositionEstimator(connection=connection),
-        route_metadata_lookup=GtfsRouteMetadataLookup(connection),
         publisher=publisher,
     )
 
@@ -95,7 +101,7 @@ async def run_dry_run(
                 feed_url=config.feed_url,
             )
             return await worker.run_once(
-                observed_at=datetime.now(timezone.utc),
+                observed_at=datetime.now(UTC),
                 max_positions=config.max_positions,
             )
         finally:
@@ -138,6 +144,7 @@ async def _main(arguments: argparse.Namespace) -> int:
                 "type": "ingestion_cycle",
                 "trip_updates_received": result.trip_updates_received,
                 "estimated_positions_published": result.estimated_positions_published,
+                "position_snapshots_published": result.position_snapshots_published,
             },
             separators=(",", ":"),
             sort_keys=True,

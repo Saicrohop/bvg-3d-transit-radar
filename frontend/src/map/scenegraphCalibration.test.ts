@@ -43,19 +43,19 @@ describe('scenegraph calibration fixtures', () => {
     const [northboundBus, eastboundTrain, southboundBus] =
       MOCK_CALIBRATION_VEHICLES
 
-    expect(getCalibrationModelUrl(northboundBus)).toBe('/models/bvg_bus.glb')
-    expect(getCalibrationModelUrl(eastboundTrain)).toBe('/models/s_bahn_db.glb')
-    expect(getScenegraphOrientation(northboundBus)).toEqual([0, 90, 90])
+    expect(getCalibrationModelUrl(northboundBus)).toBe('/models/lowpoly/bvg_bus_lowpoly_v3.glb')
+    expect(getCalibrationModelUrl(eastboundTrain)).toBe('/models/lowpoly/s_bahn_lowpoly_v1.glb')
+    expect(getScenegraphOrientation(northboundBus)).toEqual([0, 180, 90])
     expect(getScenegraphOrientation(eastboundTrain)).toEqual([0, 90, 90])
-    expect(getScenegraphOrientation(southboundBus)).toEqual([0, -90, 90])
+    expect(getScenegraphOrientation(southboundBus)).toEqual([0, 0, 90])
     expect(getScenegraphPosition(northboundBus)).toEqual([13.405, 52.52, 0])
-    expect(getScenegraphSizeScale(northboundBus)).toBe(20)
-    expect(getScenegraphSizeScale(eastboundTrain)).toBe(0.75)
-    expect(getScenegraphTranslation(northboundBus)).toEqual([0, 0, 6.293897])
+    expect(getScenegraphSizeScale(northboundBus)).toBe(1)
+    expect(getScenegraphSizeScale(eastboundTrain)).toBe(1)
+    expect(getScenegraphTranslation(northboundBus)).toEqual([0, 0, 0])
     expect(getScenegraphTranslation(eastboundTrain)).toEqual([0, 0, 0])
   })
 
-  it('applies the measured Y-up calibration for the official tram and regional assets', () => {
+  it('applies the CPU-verified metric frame for the new tram and regional assets', () => {
     const tram = {
       latitude: 52.52,
       longitude: 13.405,
@@ -69,20 +69,20 @@ describe('scenegraph calibration fixtures', () => {
       vehicleType: 'regional' as const,
     }
 
-    expect(getCalibrationModelUrl(tram)).toBe('/models/bvg_tram.glb')
-    expect(getScenegraphOrientation(tram)).toEqual([0, -180, 90])
-    expect(getScenegraphSizeScale(tram)).toBe(22)
+    expect(getCalibrationModelUrl(tram)).toBe('/models/lowpoly/bvg_tram_lowpoly_v1.glb')
+    expect(getScenegraphOrientation(tram)).toEqual([0, -90, 90])
+    expect(getScenegraphSizeScale(tram)).toBe(1)
     expect(getScenegraphTranslation(tram)).toEqual([
-      0, 0, 1.3463450148701668,
+      0, 0, 0,
     ])
 
     expect(getCalibrationModelUrl(regional)).toBe(
-      '/models/regional_bahn.glb',
+      '/models/lowpoly/regional_lowpoly_v2.glb',
     )
-    expect(getScenegraphOrientation(regional)).toEqual([0, 45, 90])
-    expect(getScenegraphSizeScale(regional)).toBe(9)
+    expect(getScenegraphOrientation(regional)).toEqual([0, 135, 90])
+    expect(getScenegraphSizeScale(regional)).toBe(1)
     expect(getScenegraphTranslation(regional)).toEqual([
-      0, 0, 2.0698822885751724,
+      0, 0, 0,
     ])
   })
 })
